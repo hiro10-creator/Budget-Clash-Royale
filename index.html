@@ -1,0 +1,389 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Sword, Shield, Zap, Crown } from 'lucide-react';
+
+const ClashRoyaleGame = () => {
+  const canvasRef = useRef(null);
+  const [elixir, setElixir] = useState(5);
+  const [enemyElixir, setEnemyElixir] = useState(5);
+  const [playerTowerHP, setPlayerTowerHP] = useState(2000);
+  const [enemyTowerHP, setEnemyTowerHP] = useState(2000);
+  const [playerKingHP, setPlayerKingHP] = useState(3000);
+  const [enemyKingHP, setEnemyKingHP] = useState(3000);
+  const [units, setUnits] = useState([]);
+  const [selectedCard, setSelectedCard] = useState(null);
+  const [gameOver, setGameOver] = useState(false);
+  const [winner, setWinner] = useState(null);
+
+  const CANVAS_WIDTH = 600;
+  const CANVAS_HEIGHT = 800;
+  const ELIXIR_MAX = 10;
+
+  const cards = [
+    { id: 1, name: 'Knight', cost: 3, hp: 150, damage: 15, speed: 1, range: 30, icon: Shield, color: '#8B4513', type: 'melee', targetPriority: 'units' },
+    { id: 2, name: 'Archer', cost: 3, hp: 80, damage: 12, speed: 1.2, range: 150, icon: Sword, color: '#9370DB', type: 'ranged', keepDistance: 120 },
+    { id: 3, name: 'Giant', cost: 5, hp: 300, damage: 20, speed: 0.6, range: 30, icon: Shield, color: '#FF6347', type: 'tank', targetPriority: 'buildings' },
+    { id: 4, name: 'Wizard', cost: 5, hp: 100, damage: 25, speed: 1, range: 180, icon: Zap, color: '#4169E1', type: 'ranged', keepDistance: 140 },
+  ];
+
+  const towers = {
+    playerLeft: { x: 150, y: 650, hp: playerTowerHP, maxHP: 2000 },
+    playerRight: { x: 450, y: 650, hp: playerTowerHP, maxHP: 2000 },
+    playerKing: { x: 300, y: 720, hp: playerKingHP, maxHP: 3000 },
+    enemyLeft: { x: 150, y: 150, hp: enemyTowerHP, maxHP: 2000 },
+    enemyRight: { x: 450, y: 150, hp: enemyTowerHP, maxHP: 2000 },
+    enemyKing: { x: 300, y: 80, hp: enemyKingHP, maxHP: 3000 },
+  };
+
+  useEffect(() => {
+    const elixirInterval = setInterval(() => {
+      setElixir(prev => Math.min(prev + 1, ELIXIR_MAX));
+      setEnemyElixir(prev => Math.min(prev + 1, ELIXIR_MAX));
+    }, 2000);
+
+    return () => clearInterval(elixirInterval);
+  }, []);
+
+  useEffect(() => {
+    const gameLoop = setInterval(() => {
+      if (gameOver) return;
+
+      setUnits(prevUnits => {
+        const newUnits = [...prevUnits];
+        
+        newUnits.forEach((unit, idx) => {
+          if (unit.hp <= 0) return;
+
+          let target = null;
+          let minDist = Infinity;
+          const enemyUnits = [];
+          const enemyTowers = [];
+
+          if (unit.team === 'player') {
+            [towers.enemyLeft, towers.enemyRight, towers.enemyKing].forEach(tower => {
+              if (tower.hp > 0) {
+                const dist = Math.hypot(unit.x - tower.x, unit.y - tower.y);
+                enemyTowers.push({ target: tower, dist, type: 'tower' });
+              }
+            });
+
+            newUnits.forEach((other, otherIdx) => {
+              if (other.team === 'enemy' && other.hp > 0) {
+                const dist = Math.hypot(unit.x - other.x, unit.y - other.y);
+                enemyUnits.push({ target: other, dist, type: 'unit' });
+              }
+            });
+          } else {
+            [towers.playerLeft, towers.playerRight, towers.playerKing].forEach(tower => {
+              if (tower.hp > 0) {
+                const dist = Math.hypot(unit.x - tower.x, unit.y - tower.y);
+                enemyTowers.push({ target: tower, dist, type: 'tower' });
+              }
+            });
+
+            newUnits.forEach((other, otherIdx) => {
+              if (other.team === 'player' && other.hp > 0) {
+                const dist = Math.hypot(unit.x - other.x, unit.y - other.y);
+                enemyUnits.push({ target: other, dist, type: 'unit' });
+              }
+            });
+          }
+
+          // Target selection based on unit type
+          if (unit.targetPriority === 'buildings') {
+            // Giants prioritize towers
+            enemyTowers.sort((a, b) => a.dist - b.dist);
+            if (enemyTowers.length > 0) {
+              target = enemyTowers[0].target;
+              minDist = enemyTowers[0].dist;
+            }
+          } else if (unit.targetPriority === 'units') {
+            // Knights prioritize nearby enemy units
+            const nearbyUnits = enemyUnits.filter(e => e.dist < 200);
+            if (nearbyUnits.length > 0) {
+              nearbyUnits.sort((a, b) => a.dist - b.dist);
+              target = nearbyUnits[0].target;
+              minDist = nearbyUnits[0].dist;
+            } else {
+              // If no nearby units, go for towers
+              enemyTowers.sort((a, b) => a.dist - b.dist);
+              if (enemyTowers.length > 0) {
+                target = enemyTowers[0].target;
+                minDist = enemyTowers[0].dist;
+              }
+            }
+          } else {
+            // Default behavior: target closest enemy (unit or tower)
+            const allEnemies = [...enemyUnits, ...enemyTowers];
+            allEnemies.sort((a, b) => a.dist - b.dist);
+            if (allEnemies.length > 0) {
+              target = allEnemies[0].target;
+              minDist = allEnemies[0].dist;
+            }
+          }
+
+          // Check for close enemies for ranged units
+          const closestEnemy = enemyUnits.length > 0 
+            ? enemyUnits.reduce((closest, current) => current.dist < closest.dist ? current : closest)
+            : null;
+
+          // Combat and movement logic
+          if (target && minDist < unit.range) {
+            // In attack range - attack
+            if (!unit.lastAttack || Date.now() - unit.lastAttack > 1000) {
+              if (target.hp !== undefined) {
+                target.hp -= unit.damage;
+                if (target === towers.playerKing) setPlayerKingHP(target.hp);
+                if (target === towers.enemyKing) setEnemyKingHP(target.hp);
+                if (target === towers.playerLeft || target === towers.playerRight) setPlayerTowerHP(target.hp);
+                if (target === towers.enemyLeft || target === towers.enemyRight) setEnemyTowerHP(target.hp);
+              } else {
+                target.hp -= unit.damage;
+              }
+              unit.lastAttack = Date.now();
+            }
+          } else if (target) {
+            // Not in range - move toward target
+            const shouldKiteBack = unit.type === 'ranged' && 
+                                   closestEnemy && 
+                                   closestEnemy.dist < unit.keepDistance;
+
+            if (shouldKiteBack) {
+              // Ranged unit kiting: move away from closest enemy while trying to maintain shooting distance
+              const enemyTarget = closestEnemy.target;
+              const dx = unit.x - enemyTarget.x;
+              const dy = unit.y - enemyTarget.y;
+              const dist = Math.hypot(dx, dy);
+              
+              // Move backwards but stay in bounds
+              const newX = unit.x + (dx / dist) * unit.speed;
+              const newY = unit.y + (dy / dist) * unit.speed;
+              
+              // Keep units on their side of the field
+              if (unit.team === 'player') {
+                unit.x = Math.max(30, Math.min(570, newX));
+                unit.y = Math.max(420, Math.min(770, newY));
+              } else {
+                unit.x = Math.max(30, Math.min(570, newX));
+                unit.y = Math.max(30, Math.min(380, newY));
+              }
+            } else {
+              // Normal movement toward target
+              const dx = target.x - unit.x;
+              const dy = target.y - unit.y;
+              const dist = Math.hypot(dx, dy);
+              unit.x += (dx / dist) * unit.speed;
+              unit.y += (dy / dist) * unit.speed;
+            }
+          }
+        });
+
+        return newUnits.filter(u => u.hp > 0);
+      });
+
+      if (enemyElixir >= 4 && Math.random() > 0.98) {
+        const card = cards[Math.floor(Math.random() * cards.length)];
+        if (enemyElixir >= card.cost) {
+          const x = Math.random() * (CANVAS_WIDTH - 100) + 50;
+          const y = Math.random() * 150 + 50;
+          deployUnit(card, x, y, 'enemy');
+          setEnemyElixir(prev => prev - card.cost);
+        }
+      }
+
+      if (towers.playerKing.hp <= 0 && !gameOver) {
+        setGameOver(true);
+        setWinner('enemy');
+      }
+      if (towers.enemyKing.hp <= 0 && !gameOver) {
+        setGameOver(true);
+        setWinner('player');
+      }
+    }, 50);
+
+    return () => clearInterval(gameLoop);
+  }, [units, gameOver, enemyElixir]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+
+    ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    ctx.fillStyle = '#2d5016';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    ctx.fillStyle = '#1a3a0f';
+    ctx.fillRect(0, 350, CANVAS_WIDTH, 100);
+
+    const drawTower = (tower, color) => {
+      if (tower.hp > 0) {
+        ctx.fillStyle = color;
+        ctx.fillRect(tower.x - 25, tower.y - 40, 50, 60);
+        ctx.fillStyle = '#8B4513';
+        ctx.fillRect(tower.x - 30, tower.y - 50, 60, 15);
+        
+        ctx.fillStyle = '#000';
+        ctx.fillRect(tower.x - 27, tower.y - 15, 54, 8);
+        ctx.fillStyle = '#FF0000';
+        const hpPercent = tower.hp / tower.maxHP;
+        ctx.fillRect(tower.x - 26, tower.y - 14, 52 * hpPercent, 6);
+      }
+    };
+
+    drawTower(towers.enemyLeft, '#ff4444');
+    drawTower(towers.enemyRight, '#ff4444');
+    drawTower(towers.enemyKing, '#cc0000');
+    drawTower(towers.playerLeft, '#4444ff');
+    drawTower(towers.playerRight, '#4444ff');
+    drawTower(towers.playerKing, '#0000cc');
+
+    units.forEach(unit => {
+      if (unit.hp > 0) {
+        ctx.fillStyle = unit.team === 'player' ? '#4169E1' : '#DC143C';
+        ctx.beginPath();
+        ctx.arc(unit.x, unit.y, 15, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = '#fff';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(unit.name[0], unit.x, unit.y + 4);
+
+        ctx.fillStyle = '#000';
+        ctx.fillRect(unit.x - 15, unit.y - 22, 30, 4);
+        ctx.fillStyle = '#00FF00';
+        ctx.fillRect(unit.x - 15, unit.y - 22, 30 * (unit.hp / unit.maxHP), 4);
+      }
+    });
+
+    if (gameOver) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      ctx.fillStyle = winner === 'player' ? '#FFD700' : '#FF0000';
+      ctx.font = 'bold 48px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(winner === 'player' ? 'VICTORY!' : 'DEFEAT!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+    }
+  }, [units, playerTowerHP, enemyTowerHP, playerKingHP, enemyKingHP, gameOver, winner]);
+
+  const deployUnit = (card, x, y, team) => {
+    const newUnit = {
+      id: Date.now() + Math.random(),
+      name: card.name,
+      x,
+      y,
+      hp: card.hp,
+      maxHP: card.hp,
+      damage: card.damage,
+      speed: card.speed,
+      range: card.range,
+      team,
+      lastAttack: 0,
+      type: card.type,
+      targetPriority: card.targetPriority,
+      keepDistance: card.keepDistance,
+    };
+    setUnits(prev => [...prev, newUnit]);
+  };
+
+  const handleCanvasClick = (e) => {
+    if (!selectedCard || gameOver) return;
+    
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    if (y > 400 && elixir >= selectedCard.cost) {
+      deployUnit(selectedCard, x, y, 'player');
+      setElixir(prev => prev - selectedCard.cost);
+      setSelectedCard(null);
+    }
+  };
+
+  const resetGame = () => {
+    setUnits([]);
+    setElixir(5);
+    setEnemyElixir(5);
+    setPlayerTowerHP(2000);
+    setEnemyTowerHP(2000);
+    setPlayerKingHP(3000);
+    setEnemyKingHP(3000);
+    setGameOver(false);
+    setWinner(null);
+    setSelectedCard(null);
+    towers.playerLeft.hp = 2000;
+    towers.playerRight.hp = 2000;
+    towers.playerKing.hp = 3000;
+    towers.enemyLeft.hp = 2000;
+    towers.enemyRight.hp = 2000;
+    towers.enemyKing.hp = 3000;
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-slate-800 to-slate-900 p-4">
+      <div className="mb-4 flex items-center gap-4">
+        <div className="bg-purple-600 px-4 py-2 rounded-lg flex items-center gap-2">
+          <Crown className="w-5 h-5 text-yellow-300" />
+          <span className="text-white font-bold">Elixir: {elixir}/{ELIXIR_MAX}</span>
+        </div>
+        <div className="bg-slate-700 px-4 py-2 rounded-lg">
+          <span className="text-white font-bold">Enemy HP: {Math.max(0, enemyKingHP)}</span>
+        </div>
+      </div>
+
+      <canvas
+        ref={canvasRef}
+        width={CANVAS_WIDTH}
+        height={CANVAS_HEIGHT}
+        onClick={handleCanvasClick}
+        className="border-4 border-yellow-600 rounded-lg shadow-2xl cursor-crosshair"
+      />
+
+      <div className="mt-4 flex gap-3">
+        {cards.map(card => {
+          const Icon = card.icon;
+          const canAfford = elixir >= card.cost;
+          return (
+            <button
+              key={card.id}
+              onClick={() => canAfford && setSelectedCard(card)}
+              disabled={!canAfford}
+              className={`relative p-4 rounded-lg border-2 transition-all ${
+                selectedCard?.id === card.id
+                  ? 'border-yellow-400 scale-110 shadow-lg'
+                  : 'border-slate-600'
+              } ${
+                canAfford
+                  ? 'bg-gradient-to-b from-slate-700 to-slate-800 hover:scale-105'
+                  : 'bg-slate-900 opacity-50'
+              }`}
+            >
+              <Icon className="w-8 h-8 mb-1" style={{ color: card.color }} />
+              <div className="text-white text-xs font-bold">{card.name}</div>
+              <div className="absolute -top-2 -right-2 bg-purple-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold">
+                {card.cost}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {gameOver && (
+        <button
+          onClick={resetGame}
+          className="mt-4 bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg text-lg transition-all"
+        >
+          Play Again
+        </button>
+      )}
+
+      <div className="mt-4 text-center text-slate-400 text-sm max-w-md">
+        <p>Click a card, then click on your side (bottom half) to deploy units!</p>
+        <p>Destroy the enemy King Tower to win!</p>
+      </div>
+    </div>
+  );
+};
+
+export default ClashRoyaleGame;
