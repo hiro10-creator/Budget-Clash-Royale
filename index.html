@@ -1,1511 +1,1443 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Sword, Shield, Zap, Crown, Wind } from 'lucide-react';
-
-const ClashRoyaleGame = () => {
-  const canvasRef = useRef(null);
-  const [elixir, setElixir] = useState(5);
-  const [enemyElixir, setEnemyElixir] = useState(5);
-  const [elixirRate, setElixirRate] = useState(2000);
-  const [playerTowerHP, setPlayerTowerHP] = useState(2500);
-  const [enemyTowerHP, setEnemyTowerHP] = useState(2500);
-  const [playerKingHP, setPlayerKingHP] = useState(4000);
-  const [enemyKingHP, setEnemyKingHP] = useState(4000);
-  const [units, setUnits] = useState([]);
-  const [projectiles, setProjectiles] = useState([]);
-  const [towerArchers, setTowerArchers] = useState([]);
-  const [clashEffects, setClashEffects] = useState([]);
-  const [selectedCard, setSelectedCard] = useState(null);
-  const [gameOver, setGameOver] = useState(false);
-  const [winner, setWinner] = useState(null);
-  const [hand, setHand] = useState([]);
-  const [deck, setDeck] = useState([]);
-  const [gameTime, setGameTime] = useState(90);
-  const [isOvertime, setIsOvertime] = useState(false);
-  const [overtimeTime, setOvertimeTime] = useState(180);
-
-  const CANVAS_WIDTH = 600;
-  const CANVAS_HEIGHT = 900;
-  const ELIXIR_MAX = 10;
-  const BRIDGE_Y = 450;
-  const LEFT_BRIDGE_START = 50;
-  const LEFT_BRIDGE_END = 250;
-  const RIGHT_BRIDGE_START = 350;
-  const RIGHT_BRIDGE_END = 550;
-
-  const allCards = [
-    { id: 1, name: 'Knight', cost: 3, hp: 150, damage: 20, speed: 1, range: 30, icon: Shield, color: '#8B4513', type: 'melee', targetPriority: 'units', isAerial: false },
-    { id: 2, name: 'Archer', cost: 3, hp: 80, damage: 15, speed: 1.2, range: 150, icon: Sword, color: '#9370DB', type: 'ranged', keepDistance: 120, isAerial: false },
-    { id: 3, name: 'Giant', cost: 5, hp: 500, damage: 35, speed: 0.6, range: 30, icon: Shield, color: '#FF6347', type: 'tank', targetPriority: 'buildings', isAerial: false },
-    { id: 4, name: 'Wizard', cost: 5, hp: 150, damage: 40, speed: 1, range: 200, icon: Zap, color: '#4169E1', type: 'ranged', keepDistance: 150, isAerial: false },
-    { id: 5, name: 'Dragon', cost: 4, hp: 200, damage: 25, speed: 1.5, range: 50, icon: Wind, color: '#FF4500', type: 'ranged', isAerial: true },
-    { id: 6, name: 'HogRider', cost: 4, hp: 180, damage: 22, speed: 2, range: 30, icon: Sword, color: '#D2691E', type: 'melee', targetPriority: 'buildings', isAerial: false },
-    { id: 7, name: 'SkeletonArmy', cost: 3, hp: 20, damage: 10, speed: 1.5, range: 25, icon: Shield, color: '#F0E68C', type: 'melee', count: 5, isAerial: false },
-    { id: 8, name: 'Balloon', cost: 5, hp: 250, damage: 30, speed: 0.8, range: 180, icon: Wind, color: '#87CEEB', type: 'ranged', keepDistance: 120, isAerial: true, dropsSkeleton: true },
-    { id: 9, name: 'MegaKnight', cost: 7, hp: 450, damage: 45, speed: 1.2, range: 35, icon: Shield, color: '#2C3E50', type: 'melee', targetPriority: 'units', isAerial: false, splash: true },
-    { id: 10, name: 'MiniPEKKA', cost: 4, hp: 220, damage: 50, speed: 1.3, range: 30, icon: Sword, color: '#34495E', type: 'melee', targetPriority: 'units', isAerial: false },
-    { id: 11, name: 'Log', cost: 2, hp: 9999, damage: 35, speed: 4, range: 30, icon: Shield, color: '#8B4513', type: 'spell', isAerial: false, lifetime: 1500 },
-  ];
-
-  const towers = useRef({
-    playerLeft: { x: 100, y: 720, hp: 2500, maxHP: 2500, destroyed: false },
-    playerRight: { x: 500, y: 720, hp: 2500, maxHP: 2500, destroyed: false },
-    playerKing: { x: 300, y: 820, hp: 4000, maxHP: 4000 },
-    enemyLeft: { x: 100, y: 180, hp: 2500, maxHP: 2500, destroyed: false },
-    enemyRight: { x: 500, y: 180, hp: 2500, maxHP: 2500, destroyed: false },
-    enemyKing: { x: 300, y: 80, hp: 4000, maxHP: 4000 },
-  });
-
-  useEffect(() => {
-    const shuffled = [...allCards].sort(() => Math.random() - 0.5);
-    setDeck(shuffled.slice(4));
-    setHand(shuffled.slice(0, 4));
-    
-    // Initialize tower archers
-    setTowerArchers([
-      { id: 'pl', towerId: 'playerLeft', x: 100, y: 665, team: 'player', lastShot: 0 },
-      { id: 'pr', towerId: 'playerRight', x: 500, y: 665, team: 'player', lastShot: 0 },
-      { id: 'el', towerId: 'enemyLeft', x: 100, y: 125, team: 'enemy', lastShot: 0 },
-      { id: 'er', towerId: 'enemyRight', x: 500, y: 125, team: 'enemy', lastShot: 0 },
-    ]);
-  }, []);
-
-  useEffect(() => {
-    const elixirInterval = setInterval(() => {
-      setElixir(prev => Math.min(prev + 1, ELIXIR_MAX));
-      setEnemyElixir(prev => Math.min(prev + 1, ELIXIR_MAX));
-    }, elixirRate);
-
-    return () => clearInterval(elixirInterval);
-  }, [elixirRate]);
-
-  // Game timer
-  useEffect(() => {
-    if (gameOver) return;
-
-    const timerInterval = setInterval(() => {
-      if (!isOvertime && gameTime > 0) {
-        setGameTime(prev => prev - 1);
-      } else if (!isOvertime && gameTime === 0) {
-        setIsOvertime(true);
-        setElixirRate(1000);
-      } else if (isOvertime && overtimeTime > 0) {
-        setOvertimeTime(prev => prev - 1);
-      } else if (isOvertime && overtimeTime === 0) {
-        endGameByDamage();
-      }
-    }, 1000);
-
-    return () => clearInterval(timerInterval);
-  }, [gameTime, isOvertime, overtimeTime, gameOver]);
-
-  const endGameByDamage = () => {
-    const playerDamage = (2500 - towers.current.playerLeft.hp) + 
-                         (2500 - towers.current.playerRight.hp) + 
-                         (4000 - towers.current.playerKing.hp);
-    
-    const enemyDamage = (2500 - towers.current.enemyLeft.hp) + 
-                        (2500 - towers.current.enemyRight.hp) + 
-                        (4000 - towers.current.enemyKing.hp);
-    
-    setGameOver(true);
-    if (enemyDamage > playerDamage) {
-      setWinner('player');
-    } else if (playerDamage > enemyDamage) {
-      setWinner('enemy');
-    } else {
-      setWinner('draw');
-    }
-  };
-
-  useEffect(() => {
-    const playerKingAlone = towers.current.playerLeft.destroyed && towers.current.playerRight.destroyed;
-    const enemyKingAlone = towers.current.enemyLeft.destroyed && towers.current.enemyRight.destroyed;
-    
-    if (playerKingAlone || enemyKingAlone) {
-      setElixirRate(1000);
-    }
-  }, [playerTowerHP, enemyTowerHP]);
-
-  useEffect(() => {
-    const gameLoop = setInterval(() => {
-      if (gameOver) return;
-
-      // Tower archers shoot at nearby enemies
-      setTowerArchers(prevArchers => {
-        const newArchers = [...prevArchers];
-        
-        newArchers.forEach(archer => {
-          const tower = towers.current[archer.towerId];
-          if (!tower || tower.hp <= 0) return;
-          
-          // Find nearest enemy unit
-          let nearestEnemy = null;
-          let minDist = Infinity;
-          
-          units.forEach(unit => {
-            if (unit.team !== archer.team && unit.hp > 0) {
-              const dist = Math.hypot(unit.x - archer.x, unit.y - archer.y);
-              if (dist < 200 && dist < minDist) {
-                minDist = dist;
-                nearestEnemy = unit;
-              }
-            }
-          });
-          
-          // Shoot at enemy
-          if (nearestEnemy && (!archer.lastShot || Date.now() - archer.lastShot > 1500)) {
-            setProjectiles(prev => [...prev, {
-              id: Date.now() + Math.random(),
-              x: archer.x,
-              y: archer.y,
-              targetX: nearestEnemy.x,
-              targetY: nearestEnemy.y,
-              target: nearestEnemy,
-              damage: 15,
-              speed: 5,
-              color: '#9370DB',
-              isTowerArcher: true,
-            }]);
-            archer.lastShot = Date.now();
-          }
-        });
-        
-        return newArchers;
-      });
-
-      setUnits(prevUnits => {
-        const newUnits = [...prevUnits];
-        
-        newUnits.forEach((unit) => {
-          if (unit.hp <= 0) return;
-
-          // Handle Log spell - rolls forward damaging everything in path
-          if (unit.name === 'Log') {
-            if (!unit.spawnTime) unit.spawnTime = Date.now();
-            if (Date.now() - unit.spawnTime > unit.lifetime) {
-              unit.hp = 0;
-              return;
-            }
-            
-            // Roll forward
-            if (unit.team === 'player') {
-              unit.y -= unit.speed;
-            } else {
-              unit.y += unit.speed;
-            }
-            
-            // Damage all units in path
-            newUnits.forEach(other => {
-              if (other !== unit && other.team !== unit.team && other.hp > 0 && !other.isAerial) {
-                const dist = Math.hypot(unit.x - other.x, unit.y - other.y);
-                if (dist < 40 && !other.hitByLog) {
-                  other.hp -= unit.damage;
-                  other.hitByLog = true;
-                  setTimeout(() => delete other.hitByLog, 100);
-                  setClashEffects(prev => [...prev, {
-                    id: Date.now() + Math.random(),
-                    x: other.x,
-                    y: other.y,
-                    time: Date.now(),
-                  }]);
-                }
-              }
-            });
-            return;
-          }
-
-          const enemyUnits = [];
-          const enemyTowers = [];
-
-          if (unit.team === 'player') {
-            Object.entries(towers.current).forEach(([key, tower]) => {
-              if (key.startsWith('enemy') && tower.hp > 0) {
-                const dist = Math.hypot(unit.x - tower.x, unit.y - tower.y);
-                enemyTowers.push({ target: tower, dist, type: 'tower', key });
-              }
-            });
-
-            newUnits.forEach((other) => {
-              if (other.team === 'enemy' && other.hp > 0) {
-                // Melee ground units can't target aerial units
-                if (!unit.isAerial && other.isAerial && unit.type === 'melee') return;
-                // Ranged ground units CAN target aerial units
-                const dist = Math.hypot(unit.x - other.x, unit.y - other.y);
-                enemyUnits.push({ target: other, dist, type: 'unit' });
-              }
-            });
-          } else {
-            Object.entries(towers.current).forEach(([key, tower]) => {
-              if (key.startsWith('player') && tower.hp > 0) {
-                const dist = Math.hypot(unit.x - tower.x, unit.y - tower.y);
-                enemyTowers.push({ target: tower, dist, type: 'tower', key });
-              }
-            });
-
-            newUnits.forEach((other) => {
-              if (other.team === 'player' && other.hp > 0) {
-                // Melee ground units can't target aerial units
-                if (!unit.isAerial && other.isAerial && unit.type === 'melee') return;
-                // Ranged ground units CAN target aerial units
-                const dist = Math.hypot(unit.x - other.x, unit.y - other.y);
-                enemyUnits.push({ target: other, dist, type: 'unit' });
-              }
-            });
-          }
-
-          let target = null;
-          let minDist = Infinity;
-
-          if (unit.targetPriority === 'buildings') {
-            enemyTowers.sort((a, b) => a.dist - b.dist);
-            if (enemyTowers.length > 0) {
-              target = enemyTowers[0].target;
-              minDist = enemyTowers[0].dist;
-            }
-          } else if (unit.targetPriority === 'units') {
-            const nearbyUnits = enemyUnits.filter(e => e.dist < 200);
-            if (nearbyUnits.length > 0) {
-              nearbyUnits.sort((a, b) => a.dist - b.dist);
-              target = nearbyUnits[0].target;
-              minDist = nearbyUnits[0].dist;
-            } else {
-              // If no nearby units, go for side towers first, then king tower
-              const sideTowers = enemyTowers.filter(t => 
-                (t.key === 'enemyLeft' || t.key === 'enemyRight' || t.key === 'playerLeft' || t.key === 'playerRight')
-              );
-              const kingTowers = enemyTowers.filter(t => 
-                (t.key === 'enemyKing' || t.key === 'playerKing')
-              );
-              
-              if (sideTowers.length > 0) {
-                sideTowers.sort((a, b) => a.dist - b.dist);
-                target = sideTowers[0].target;
-                minDist = sideTowers[0].dist;
-              } else if (kingTowers.length > 0) {
-                kingTowers.sort((a, b) => a.dist - b.dist);
-                target = kingTowers[0].target;
-                minDist = kingTowers[0].dist;
-              }
-            }
-          } else {
-            // Default behavior: prioritize side towers, then king tower, then units
-            const sideTowers = enemyTowers.filter(t => 
-              (t.key === 'enemyLeft' || t.key === 'enemyRight' || t.key === 'playerLeft' || t.key === 'playerRight')
-            );
-            const kingTowers = enemyTowers.filter(t => 
-              (t.key === 'enemyKing' || t.key === 'playerKing')
-            );
-            
-            const allTargets = [...enemyUnits];
-            if (sideTowers.length > 0) {
-              allTargets.push(...sideTowers);
-            } else if (kingTowers.length > 0) {
-              allTargets.push(...kingTowers);
-            }
-            
-            allTargets.sort((a, b) => a.dist - b.dist);
-            if (allTargets.length > 0) {
-              target = allTargets[0].target;
-              minDist = allTargets[0].dist;
-            }
-          }
-
-          const closestEnemy = enemyUnits.length > 0 
-            ? enemyUnits.reduce((closest, current) => current.dist < closest.dist ? current : closest)
-            : null;
-
-          if (target && minDist < unit.range) {
-            if (!unit.lastAttack || Date.now() - unit.lastAttack > 1000) {
-              const damageAmount = unit.isAerial && !target.isAerial ? unit.damage * 0.8 : unit.damage;
-              
-              if (unit.type === 'ranged') {
-                setProjectiles(prev => [...prev, {
-                  id: Date.now() + Math.random(),
-                  x: unit.x,
-                  y: unit.y,
-                  targetX: target.x,
-                  targetY: target.y,
-                  target: target,
-                  damage: damageAmount,
-                  speed: 5,
-                  color: unit.color,
-                  isFireBreath: unit.name === 'Dragon',
-                }]);
-              } else {
-                // Handle splash damage for Mega Knight
-                if (unit.splash) {
-                  // Damage all nearby enemies
-                  newUnits.forEach(other => {
-                    if (other.team !== unit.team && other.hp > 0) {
-                      const dist = Math.hypot(unit.x - other.x, unit.y - other.y);
-                      if (dist < 60) {
-                        other.hp -= damageAmount;
-                        setClashEffects(prev => [...prev, {
-                          id: Date.now() + Math.random(),
-                          x: other.x,
-                          y: other.y,
-                          time: Date.now(),
-                        }]);
-                      }
-                    }
-                  });
-                } else {
-                  // Regular melee attack
-                  if (target.hp !== undefined) {
-                    target.hp -= damageAmount;
-                  
-                  Object.entries(towers.current).forEach(([key, tower]) => {
-                    if (tower === target) {
-                      if (key === 'playerKing') setPlayerKingHP(target.hp);
-                      if (key === 'enemyKing') setEnemyKingHP(target.hp);
-                      if (key === 'playerLeft' || key === 'playerRight') {
-                        setPlayerTowerHP(target.hp);
-                        if (target.hp <= 0) tower.destroyed = true;
-                      }
-                      if (key === 'enemyLeft' || key === 'enemyRight') {
-                        setEnemyTowerHP(target.hp);
-                        if (target.hp <= 0) tower.destroyed = true;
-                      }
-                    }
-                  });
-                  } else {
-                    target.hp -= damageAmount;
-                    setClashEffects(prev => [...prev, {
-                      id: Date.now() + Math.random(),
-                      x: (unit.x + target.x) / 2,
-                      y: (unit.y + target.y) / 2,
-                      time: Date.now(),
-                    }]);
-                  }
-                }
-              }
-              unit.lastAttack = Date.now();
-            }
-          } else if (target) {
-            const shouldKiteBack = unit.type === 'ranged' && 
-                                   closestEnemy && 
-                                   closestEnemy.dist < unit.keepDistance;
-
-            if (shouldKiteBack) {
-              const enemyTarget = closestEnemy.target;
-              const dx = unit.x - enemyTarget.x;
-              const dy = unit.y - enemyTarget.y;
-              const dist = Math.hypot(dx, dy);
-              
-              const newX = unit.x + (dx / dist) * unit.speed;
-              const newY = unit.y + (dy / dist) * unit.speed;
-              
-              if (unit.team === 'player') {
-                unit.x = Math.max(30, Math.min(570, newX));
-                unit.y = Math.max(BRIDGE_Y + 20, Math.min(870, newY));
-              } else {
-                unit.x = Math.max(30, Math.min(570, newX));
-                unit.y = Math.max(30, Math.min(BRIDGE_Y - 20, newY));
-              }
-            } else {
-              const dx = target.x - unit.x;
-              const dy = target.y - unit.y;
-              const dist = Math.hypot(dx, dy);
-              const newX = unit.x + (dx / dist) * unit.speed;
-              const newY = unit.y + (dy / dist) * unit.speed;
-              
-              // Check if unit can move to new position (not blocked by water unless aerial)
-              if (unit.isAerial) {
-                // Aerial units can fly anywhere
-                unit.x = newX;
-                unit.y = newY;
-              } else {
-                // Ground units must check for water
-                const isInWater = newY > BRIDGE_Y - 50 && newY < BRIDGE_Y + 50;
-                const isOnLeftBridge = isInWater && newX >= LEFT_BRIDGE_START && newX <= LEFT_BRIDGE_END;
-                const isOnRightBridge = isInWater && newX >= RIGHT_BRIDGE_START && newX <= RIGHT_BRIDGE_END;
-                
-                if (!isInWater || isOnLeftBridge || isOnRightBridge) {
-                  // Safe to move
-                  unit.x = newX;
-                  unit.y = newY;
-                } else {
-                  // Blocked by water, try to move toward nearest bridge
-                  const midpoint = (LEFT_BRIDGE_END + RIGHT_BRIDGE_START) / 2;
-                  
-                  if (unit.x < midpoint) {
-                    // Go to left bridge
-                    const bridgeCenterX = LEFT_BRIDGE_END / 2;
-                    const bridgeDx = bridgeCenterX - unit.x;
-                    const bridgeDy = BRIDGE_Y - unit.y;
-                    const bridgeDist = Math.hypot(bridgeDx, bridgeDy);
-                    
-                    if (bridgeDist > 5) {
-                      unit.x += (bridgeDx / bridgeDist) * unit.speed;
-                      unit.y += (bridgeDy / bridgeDist) * unit.speed;
-                    }
-                  } else {
-                    // Go to right bridge
-                    const bridgeCenterX = (RIGHT_BRIDGE_START + RIGHT_BRIDGE_END) / 2;
-                    const bridgeDx = bridgeCenterX - unit.x;
-                    const bridgeDy = BRIDGE_Y - unit.y;
-                    const bridgeDist = Math.hypot(bridgeDx, bridgeDy);
-                    
-                    if (bridgeDist > 5) {
-                      unit.x += (bridgeDx / bridgeDist) * unit.speed;
-                      unit.y += (bridgeDy / bridgeDist) * unit.speed;
-                    }
-                  }
-                }
-              }
-            }
-          }
-        });
-
-        return newUnits.filter(u => {
-          if (u.hp <= 0) {
-            if (u.dropsSkeleton) {
-              const skeletonCard = allCards.find(c => c.name === 'SkeletonArmy');
-              for (let i = 0; i < 2; i++) {
-                setTimeout(() => {
-                  const newUnit = {
-                    id: Date.now() + Math.random(),
-                    name: 'Skeleton',
-                    x: u.x + (Math.random() - 0.5) * 40,
-                    y: u.y,
-                    hp: 20,
-                    maxHP: 20,
-                    damage: 10,
-                    speed: 1.5,
-                    range: 25,
-                    team: u.team,
-                    lastAttack: 0,
-                    type: 'melee',
-                    isAerial: false,
-                    color: '#F0E68C',
-                  };
-                  setUnits(prev => [...prev, newUnit]);
-                }, i * 100);
-              }
-            }
-            return false;
-          }
-          return true;
-        });
-      });
-
-      setProjectiles(prevProj => {
-        return prevProj.filter(proj => {
-          const dx = proj.targetX - proj.x;
-          const dy = proj.targetY - proj.y;
-          const dist = Math.hypot(dx, dy);
-
-          if (dist < proj.speed) {
-            if (proj.target.hp !== undefined) {
-              proj.target.hp -= proj.damage;
-              
-              Object.entries(towers.current).forEach(([key, tower]) => {
-                if (tower === proj.target) {
-                  if (key === 'playerKing') setPlayerKingHP(proj.target.hp);
-                  if (key === 'enemyKing') setEnemyKingHP(proj.target.hp);
-                  if (key === 'playerLeft' || key === 'playerRight') {
-                    setPlayerTowerHP(proj.target.hp);
-                    if (proj.target.hp <= 0) tower.destroyed = true;
-                  }
-                  if (key === 'enemyLeft' || key === 'enemyRight') {
-                    setEnemyTowerHP(proj.target.hp);
-                    if (proj.target.hp <= 0) tower.destroyed = true;
-                  }
-                }
-              });
-            } else {
-              proj.target.hp -= proj.damage;
-            }
-            return false;
-          }
-
-          proj.x += (dx / dist) * proj.speed;
-          proj.y += (dy / dist) * proj.speed;
-          return true;
-        });
-      });
-
-      setClashEffects(prev => prev.filter(e => Date.now() - e.time < 300));
-
-      if (enemyElixir >= 4 && Math.random() > 0.988) {
-        const availableCards = allCards.filter(card => {
-          const count = units.filter(u => u.team === 'enemy' && u.name === card.name).length;
-          return count < 4 && enemyElixir >= card.cost;
-        });
-        
-        if (availableCards.length > 0) {
-          const card = availableCards[Math.floor(Math.random() * availableCards.length)];
-          const x = Math.random() * (CANVAS_WIDTH - 100) + 50;
-          const y = Math.random() * 150 + 50;
-          deployUnit(card, x, y, 'enemy');
-          setEnemyElixir(prev => prev - card.cost);
-        }
-      }
-
-      if (towers.current.playerKing.hp <= 0 && !gameOver) {
-        setGameOver(true);
-        setWinner('enemy');
-      }
-      if (towers.current.enemyKing.hp <= 0 && !gameOver) {
-        setGameOver(true);
-        setWinner('player');
-      }
-    }, 50);
-
-    return () => clearInterval(gameLoop);
-  }, [units, gameOver, enemyElixir, projectiles, towerArchers]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-
-    ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    ctx.fillStyle = '#2d5016';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    ctx.fillStyle = '#4A90E2';
-    ctx.fillRect(0, BRIDGE_Y - 50, CANVAS_WIDTH, 100);
-    
-    ctx.fillStyle = '#8B4513';
-    ctx.fillRect(100, BRIDGE_Y - 30, 100, 60);
-    ctx.fillRect(400, BRIDGE_Y - 30, 100, 60);
-
-    const drawTower = (tower, color, destroyed, isKing) => {
-      if (tower.hp > 0) {
-        if (isKing) {
-          // King Castle - larger and more ornate
-          // Castle base/walls
-          ctx.fillStyle = '#5a5a5a';
-          ctx.fillRect(tower.x - 40, tower.y - 10, 80, 35);
-          
-          // Main castle keep
-          const gradient = ctx.createLinearGradient(tower.x - 35, tower.y - 50, tower.x + 35, tower.y - 50);
-          gradient.addColorStop(0, color);
-          gradient.addColorStop(0.5, color);
-          gradient.addColorStop(1, '#000');
-          ctx.fillStyle = gradient;
-          ctx.fillRect(tower.x - 35, tower.y - 50, 70, 65);
-          
-          // Stone brick pattern
-          ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
-          ctx.lineWidth = 1;
-          for (let i = 0; i < 6; i++) {
-            ctx.beginPath();
-            ctx.moveTo(tower.x - 35, tower.y - 50 + i * 12);
-            ctx.lineTo(tower.x + 35, tower.y - 50 + i * 12);
-            ctx.stroke();
-          }
-          for (let i = 0; i < 5; i++) {
-            ctx.beginPath();
-            ctx.moveTo(tower.x - 35 + i * 18, tower.y - 50);
-            ctx.lineTo(tower.x - 35 + i * 18, tower.y + 15);
-            ctx.stroke();
-          }
-          
-          // Battlements/crenellations
-          ctx.fillStyle = color;
-          for (let i = 0; i < 7; i++) {
-            if (i % 2 === 0) {
-              ctx.fillRect(tower.x - 35 + i * 10, tower.y - 60, 10, 10);
-            }
-          }
-          
-          // Castle towers on sides
-          ctx.fillStyle = gradient;
-          ctx.fillRect(tower.x - 45, tower.y - 40, 12, 55);
-          ctx.fillRect(tower.x + 33, tower.y - 40, 12, 55);
-          
-          // Tower tops
-          ctx.fillStyle = '#8B4513';
-          ctx.beginPath();
-          ctx.moveTo(tower.x - 48, tower.y - 40);
-          ctx.lineTo(tower.x - 39, tower.y - 50);
-          ctx.lineTo(tower.x - 30, tower.y - 40);
-          ctx.closePath();
-          ctx.fill();
-          
-          ctx.beginPath();
-          ctx.moveTo(tower.x + 30, tower.y - 40);
-          ctx.lineTo(tower.x + 39, tower.y - 50);
-          ctx.lineTo(tower.x + 48, tower.y - 40);
-          ctx.closePath();
-          ctx.fill();
-          
-          // Windows
-          ctx.fillStyle = '#FFD700';
-          ctx.fillRect(tower.x - 20, tower.y - 35, 10, 15);
-          ctx.fillRect(tower.x + 10, tower.y - 35, 10, 15);
-          ctx.fillRect(tower.x - 5, tower.y - 20, 10, 15);
-          
-          // Door
-          ctx.fillStyle = '#654321';
-          ctx.fillRect(tower.x - 12, tower.y, 24, 20);
-          ctx.strokeStyle = '#000';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(tower.x - 12, tower.y, 24, 20);
-        } else {
-          // Side Tower/Castle - smaller but still castle-like
-          // Castle base
-          ctx.fillStyle = '#5a5a5a';
-          ctx.fillRect(tower.x - 35, tower.y - 5, 70, 30);
-          
-          // Main tower body
-          const gradient = ctx.createLinearGradient(tower.x - 30, tower.y - 45, tower.x + 30, tower.y - 45);
-          gradient.addColorStop(0, color);
-          gradient.addColorStop(0.5, color);
-          gradient.addColorStop(1, '#000');
-          ctx.fillStyle = gradient;
-          ctx.fillRect(tower.x - 30, tower.y - 45, 60, 65);
-          
-          // Stone brick lines
-          ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
-          ctx.lineWidth = 1;
-          for (let i = 0; i < 5; i++) {
-            ctx.beginPath();
-            ctx.moveTo(tower.x - 30, tower.y - 45 + i * 13);
-            ctx.lineTo(tower.x + 30, tower.y - 45 + i * 13);
-            ctx.stroke();
-          }
-          for (let i = 0; i < 4; i++) {
-            ctx.beginPath();
-            ctx.moveTo(tower.x - 30 + i * 20, tower.y - 45);
-            ctx.lineTo(tower.x - 30 + i * 20, tower.y + 20);
-            ctx.stroke();
-          }
-          
-          // Battlements
-          ctx.fillStyle = color;
-          for (let i = 0; i < 6; i++) {
-            if (i % 2 === 0) {
-              ctx.fillRect(tower.x - 30 + i * 10, tower.y - 55, 10, 10);
-            }
-          }
-          
-          // Side turrets
-          ctx.fillStyle = gradient;
-          ctx.fillRect(tower.x - 38, tower.y - 35, 10, 50);
-          ctx.fillRect(tower.x + 28, tower.y - 35, 10, 50);
-          
-          // Turret tops
-          ctx.fillStyle = '#8B4513';
-          ctx.beginPath();
-          ctx.moveTo(tower.x - 40, tower.y - 35);
-          ctx.lineTo(tower.x - 33, tower.y - 43);
-          ctx.lineTo(tower.x - 26, tower.y - 35);
-          ctx.closePath();
-          ctx.fill();
-          
-          ctx.beginPath();
-          ctx.moveTo(tower.x + 26, tower.y - 35);
-          ctx.lineTo(tower.x + 33, tower.y - 43);
-          ctx.lineTo(tower.x + 40, tower.y - 35);
-          ctx.closePath();
-          ctx.fill();
-          
-          // Windows
-          ctx.fillStyle = '#FFD700';
-          ctx.fillRect(tower.x - 18, tower.y - 30, 8, 12);
-          ctx.fillRect(tower.x + 10, tower.y - 30, 8, 12);
-          ctx.fillRect(tower.x - 4, tower.y - 15, 8, 12);
-          
-          // Door
-          ctx.fillStyle = '#654321';
-          ctx.fillRect(tower.x - 10, tower.y + 5, 20, 18);
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clash Royale Game</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
         
-        // HP bar background
-        ctx.fillStyle = '#000';
-        ctx.fillRect(tower.x - 35, tower.y - 20, 70, 10);
-        ctx.fillStyle = '#FF0000';
-        const hpPercent = tower.hp / tower.maxHP;
-        ctx.fillRect(tower.x - 34, tower.y - 19, 68 * hpPercent, 8);
-        
-        // HP bar border
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(tower.x - 35, tower.y - 20, 70, 10);
-      } else if (destroyed) {
-        // Draw ruins
-        ctx.fillStyle = '#4a4a4a';
-        ctx.fillRect(tower.x - 20, tower.y - 20, 40, 40);
-        ctx.fillStyle = '#3a3a3a';
-        ctx.fillRect(tower.x - 15, tower.y - 15, 15, 30);
-        ctx.fillRect(tower.x + 5, tower.y - 10, 12, 25);
-        
-        // Broken stones
-        ctx.fillStyle = '#5a5a5a';
-        ctx.fillRect(tower.x - 25, tower.y + 5, 10, 8);
-        ctx.fillRect(tower.x + 15, tower.y + 8, 8, 6);
-        ctx.fillRect(tower.x - 5, tower.y + 10, 12, 7);
-        
-        // Animated fire effects
-        const time = Date.now();
-        for (let i = 0; i < 3; i++) {
-          const offset = Math.sin(time / 200 + i) * 3;
-          const fireY = tower.y - 25 + offset - i * 8;
-          const fireSize = 8 + Math.sin(time / 150 + i * 2) * 3;
-          
-          // Orange flame
-          ctx.fillStyle = `rgba(255, ${100 + Math.sin(time / 100 + i) * 50}, 0, ${0.6 + Math.sin(time / 180 + i) * 0.3})`;
-          ctx.beginPath();
-          ctx.arc(tower.x - 10 + i * 10, fireY, fireSize, 0, Math.PI * 2);
-          ctx.fill();
-          
-          // Yellow center
-          ctx.fillStyle = `rgba(255, 255, 0, ${0.5 + Math.sin(time / 120 + i) * 0.3})`;
-          ctx.beginPath();
-          ctx.arc(tower.x - 10 + i * 10, fireY, fireSize * 0.5, 0, Math.PI * 2);
-          ctx.fill();
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(to bottom, #1e293b, #0f172a);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
         }
         
-        // Smoke
-        ctx.fillStyle = `rgba(60, 60, 60, ${0.3 + Math.sin(time / 300) * 0.1})`;
-        ctx.beginPath();
-        ctx.arc(tower.x, tower.y - 35, 15 + Math.sin(time / 250) * 5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    };
-
-    drawTower(towers.current.enemyLeft, '#ff4444', towers.current.enemyLeft.destroyed);
-    drawTower(towers.current.enemyRight, '#ff4444', towers.current.enemyRight.destroyed);
-    drawTower(towers.current.enemyKing, '#cc0000', false);
-    drawTower(towers.current.playerLeft, '#4444ff', towers.current.playerLeft.destroyed);
-    drawTower(towers.current.playerRight, '#4444ff', towers.current.playerRight.destroyed);
-    drawTower(towers.current.playerKing, '#0000cc', false);
-
-    // Draw units with models
-    const drawUnitModel = (unit) => {
-      const baseY = unit.isAerial ? unit.y - 10 : unit.y;
-      const isEnemy = unit.team === 'enemy';
-      
-      if (unit.name === 'Knight') {
-        // Knight body
-        ctx.fillStyle = isEnemy ? '#DC143C' : '#4169E1';
-        ctx.fillRect(unit.x - 8, baseY - 5, 16, 18);
-        
-        // Armor shine
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-        ctx.fillRect(unit.x - 6, baseY - 3, 4, 14);
-        
-        // Head
-        ctx.fillStyle = '#FFD1A3';
-        ctx.beginPath();
-        ctx.arc(unit.x, baseY - 12, 7, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Helmet
-        ctx.fillStyle = '#808080';
-        ctx.beginPath();
-        ctx.arc(unit.x, baseY - 13, 7, Math.PI, Math.PI * 2);
-        ctx.fill();
-        
-        // Shield
-        ctx.fillStyle = '#C0C0C0';
-        ctx.beginPath();
-        ctx.arc(unit.x - 10, baseY + 3, 6, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Sword
-        ctx.fillStyle = '#A9A9A9';
-        ctx.fillRect(unit.x + 8, baseY - 8, 3, 15);
-        ctx.fillStyle = '#8B7355';
-        ctx.fillRect(unit.x + 7, baseY + 7, 5, 4);
-      } else if (unit.name === 'Archer') {
-        // Archer body
-        ctx.fillStyle = '#9370DB';
-        ctx.fillRect(unit.x - 6, baseY - 3, 12, 16);
-        
-        // Head
-        ctx.fillStyle = '#FFD1A3';
-        ctx.beginPath();
-        ctx.arc(unit.x, baseY - 10, 6, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Hood
-        ctx.fillStyle = '#6A5ACD';
-        ctx.beginPath();
-        ctx.moveTo(unit.x - 7, baseY - 10);
-        ctx.lineTo(unit.x, baseY - 16);
-        ctx.lineTo(unit.x + 7, baseY - 10);
-        ctx.fill();
-        
-        // Bow
-        ctx.strokeStyle = '#8B4513';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(unit.x + 8, baseY, 8, -Math.PI/2, Math.PI/2);
-        ctx.stroke();
-        
-        // Arrow
-        ctx.strokeStyle = '#654321';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(unit.x + 8, baseY);
-        ctx.lineTo(unit.x + 14, baseY);
-        ctx.stroke();
-      } else if (unit.name === 'Giant') {
-        // Giant body
-        ctx.fillStyle = '#FF6347';
-        ctx.fillRect(unit.x - 12, baseY - 10, 24, 30);
-        
-        // Belt
-        ctx.fillStyle = '#8B4513';
-        ctx.fillRect(unit.x - 12, baseY + 8, 24, 4);
-        
-        // Head
-        ctx.fillStyle = '#FFD1A3';
-        ctx.beginPath();
-        ctx.arc(unit.x, baseY - 22, 10, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Hair
-        ctx.fillStyle = '#654321';
-        ctx.fillRect(unit.x - 10, baseY - 28, 20, 6);
-        
-        // Arms
-        ctx.fillStyle = '#FFD1A3';
-        ctx.fillRect(unit.x - 16, baseY - 5, 5, 15);
-        ctx.fillRect(unit.x + 11, baseY - 5, 5, 15);
-      } else if (unit.name === 'Wizard') {
-        // Wizard robe
-        ctx.fillStyle = '#4169E1';
-        ctx.beginPath();
-        ctx.moveTo(unit.x, baseY - 5);
-        ctx.lineTo(unit.x - 10, baseY + 13);
-        ctx.lineTo(unit.x + 10, baseY + 13);
-        ctx.closePath();
-        ctx.fill();
-        
-        // Robe details
-        ctx.strokeStyle = '#FFD700';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(unit.x - 8, baseY + 5);
-        ctx.lineTo(unit.x + 8, baseY + 5);
-        ctx.stroke();
-        
-        // Head
-        ctx.fillStyle = '#FFD1A3';
-        ctx.beginPath();
-        ctx.arc(unit.x, baseY - 12, 6, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Wizard hat
-        ctx.fillStyle = '#4169E1';
-        ctx.beginPath();
-        ctx.moveTo(unit.x - 8, baseY - 12);
-        ctx.lineTo(unit.x, baseY - 25);
-        ctx.lineTo(unit.x + 8, baseY - 12);
-        ctx.closePath();
-        ctx.fill();
-        
-        // Hat brim
-        ctx.fillStyle = '#4169E1';
-        ctx.fillRect(unit.x - 10, baseY - 12, 20, 3);
-        
-        // Stars on hat
-        ctx.fillStyle = '#FFD700';
-        ctx.beginPath();
-        ctx.arc(unit.x, baseY - 18, 2, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Staff
-        ctx.strokeStyle = '#8B4513';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(unit.x + 8, baseY - 5);
-        ctx.lineTo(unit.x + 8, baseY + 10);
-        ctx.stroke();
-        
-        // Staff orb
-        ctx.fillStyle = '#9370DB';
-        ctx.beginPath();
-        ctx.arc(unit.x + 8, baseY - 8, 4, 0, Math.PI * 2);
-        ctx.fill();
-      } else if (unit.name === 'Dragon') {
-        // Dragon body
-        ctx.fillStyle = '#FF4500';
-        ctx.fillRect(unit.x - 10, baseY - 5, 20, 12);
-        
-        // Dragon head
-        ctx.fillStyle = '#FF6347';
-        ctx.beginPath();
-        ctx.arc(unit.x + 12, baseY - 2, 8, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Eyes
-        ctx.fillStyle = '#FFD700';
-        ctx.beginPath();
-        ctx.arc(unit.x + 14, baseY - 4, 2, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Horns
-        ctx.fillStyle = '#8B0000';
-        ctx.beginPath();
-        ctx.moveTo(unit.x + 10, baseY - 8);
-        ctx.lineTo(unit.x + 8, baseY - 14);
-        ctx.lineTo(unit.x + 12, baseY - 10);
-        ctx.fill();
-        
-        ctx.beginPath();
-        ctx.moveTo(unit.x + 14, baseY - 8);
-        ctx.lineTo(unit.x + 16, baseY - 14);
-        ctx.lineTo(unit.x + 12, baseY - 10);
-        ctx.fill();
-        
-        // Wings
-        ctx.fillStyle = '#FF8C00';
-        ctx.beginPath();
-        ctx.moveTo(unit.x - 5, baseY);
-        ctx.lineTo(unit.x - 18, baseY - 10);
-        ctx.lineTo(unit.x - 8, baseY + 5);
-        ctx.closePath();
-        ctx.fill();
-        
-        ctx.beginPath();
-        ctx.moveTo(unit.x - 5, baseY);
-        ctx.lineTo(unit.x - 18, baseY + 10);
-        ctx.lineTo(unit.x - 8, baseY + 5);
-        ctx.closePath();
-        ctx.fill();
-        
-        // Tail
-        ctx.strokeStyle = '#FF4500';
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.moveTo(unit.x - 10, baseY);
-        ctx.quadraticCurveTo(unit.x - 18, baseY + 5, unit.x - 22, baseY);
-        ctx.stroke();
-      } else if (unit.name === 'HogRider') {
-        // Hog body
-        ctx.fillStyle = '#8B4513';
-        ctx.fillRect(unit.x - 10, baseY, 20, 12);
-        
-        // Hog head
-        ctx.fillStyle = '#A0522D';
-        ctx.beginPath();
-        ctx.arc(unit.x + 12, baseY + 6, 7, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Rider body
-        ctx.fillStyle = '#D2691E';
-        ctx.fillRect(unit.x - 6, baseY - 10, 12, 14);
-        
-        // Rider head
-        ctx.fillStyle = '#FFD1A3';
-        ctx.beginPath();
-        ctx.arc(unit.x, baseY - 16, 6, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Helmet
-        ctx.fillStyle = '#C0C0C0';
-        ctx.beginPath();
-        ctx.arc(unit.x, baseY - 17, 6, Math.PI, Math.PI * 2);
-        ctx.fill();
-        
-        // Hammer
-        ctx.strokeStyle = '#8B4513';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(unit.x + 8, baseY - 10);
-        ctx.lineTo(unit.x + 8, baseY - 18);
-        ctx.stroke();
-        
-        ctx.fillStyle = '#808080';
-        ctx.fillRect(unit.x + 4, baseY - 22, 8, 6);
-      } else if (unit.name === 'MegaKnight') {
-        // Mega Knight - large armored knight
-        const baseY = unit.isAerial ? unit.y - 10 : unit.y;
-        const isEnemy = unit.team === 'enemy';
-        
-        // Body - larger
-        ctx.fillStyle = '#2C3E50';
-        ctx.fillRect(unit.x - 12, baseY - 8, 24, 26);
-        
-        // Armor plates
-        ctx.fillStyle = '#34495E';
-        ctx.fillRect(unit.x - 10, baseY - 6, 8, 10);
-        ctx.fillRect(unit.x + 2, baseY - 6, 8, 10);
-        
-        // Spikes on shoulders
-        ctx.fillStyle = '#C0C0C0';
-        ctx.beginPath();
-        ctx.moveTo(unit.x - 12, baseY - 8);
-        ctx.lineTo(unit.x - 16, baseY - 12);
-        ctx.lineTo(unit.x - 10, baseY - 4);
-        ctx.fill();
-        
-        ctx.beginPath();
-        ctx.moveTo(unit.x + 12, baseY - 8);
-        ctx.lineTo(unit.x + 16, baseY - 12);
-        ctx.lineTo(unit.x + 10, baseY - 4);
-        ctx.fill();
-        
-        // Head
-        ctx.fillStyle = '#1C2833';
-        ctx.beginPath();
-        ctx.arc(unit.x, baseY - 16, 8, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Helmet horns
-        ctx.fillStyle = '#95A5A6';
-        ctx.beginPath();
-        ctx.moveTo(unit.x - 6, baseY - 18);
-        ctx.lineTo(unit.x - 10, baseY - 24);
-        ctx.lineTo(unit.x - 4, baseY - 20);
-        ctx.fill();
-        
-        ctx.beginPath();
-        ctx.moveTo(unit.x + 6, baseY - 18);
-        ctx.lineTo(unit.x + 10, baseY - 24);
-        ctx.lineTo(unit.x + 4, baseY - 20);
-        ctx.fill();
-        
-        // Glowing eyes
-        ctx.fillStyle = '#E74C3C';
-        ctx.beginPath();
-        ctx.arc(unit.x - 3, baseY - 17, 2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(unit.x + 3, baseY - 17, 2, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Cape
-        ctx.fillStyle = '#8E44AD';
-        ctx.beginPath();
-        ctx.moveTo(unit.x - 8, baseY - 6);
-        ctx.lineTo(unit.x - 14, baseY + 10);
-        ctx.lineTo(unit.x - 6, baseY + 12);
-        ctx.fill();
-        
-        ctx.beginPath();
-        ctx.moveTo(unit.x + 8, baseY - 6);
-        ctx.lineTo(unit.x + 14, baseY + 10);
-        ctx.lineTo(unit.x + 6, baseY + 12);
-        ctx.fill();
-      } else if (unit.name === 'MiniPEKKA') {
-        // Mini PEKKA - robotic warrior
-        const baseY = unit.isAerial ? unit.y - 10 : unit.y;
-        
-        // Body - robotic
-        ctx.fillStyle = '#34495E';
-        ctx.fillRect(unit.x - 10, baseY - 5, 20, 20);
-        
-        // Chest plate
-        ctx.fillStyle = '#7F8C8D';
-        ctx.fillRect(unit.x - 8, baseY - 3, 16, 14);
-        
-        // Central core
-        ctx.fillStyle = '#E74C3C';
-        ctx.beginPath();
-        ctx.arc(unit.x, baseY + 4, 4, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Head/Helmet
-        ctx.fillStyle = '#2C3E50';
-        ctx.fillRect(unit.x - 8, baseY - 14, 16, 10);
-        
-        // Visor
-        ctx.fillStyle = '#3498DB';
-        ctx.fillRect(unit.x - 6, baseY - 11, 12, 4);
-        
-        // Horns
-        ctx.fillStyle = '#95A5A6';
-        ctx.beginPath();
-        ctx.moveTo(unit.x - 8, baseY - 12);
-        ctx.lineTo(unit.x - 12, baseY - 16);
-        ctx.lineTo(unit.x - 6, baseY - 14);
-        ctx.fill();
-        
-        ctx.beginPath();
-        ctx.moveTo(unit.x + 8, baseY - 12);
-        ctx.lineTo(unit.x + 12, baseY - 16);
-        ctx.lineTo(unit.x + 6, baseY - 14);
-        ctx.fill();
-        
-        // Large sword
-        ctx.fillStyle = '#95A5A6';
-        ctx.fillRect(unit.x + 10, baseY - 10, 4, 22);
-        ctx.fillStyle = '#ECF0F1';
-        ctx.fillRect(unit.x + 11, baseY - 10, 2, 18);
-        
-        // Sword handle
-        ctx.fillStyle = '#8B4513';
-        ctx.fillRect(unit.x + 9, baseY + 12, 6, 4);
-      } else if (unit.name === 'Log') {
-        // Rolling log
-        const baseY = unit.isAerial ? unit.y - 10 : unit.y;
-        
-        // Log body
-        ctx.fillStyle = '#8B4513';
-        ctx.fillRect(unit.x - 25, baseY - 12, 50, 24);
-        
-        // Wood texture/rings
-        ctx.strokeStyle = '#654321';
-        ctx.lineWidth = 2;
-        for (let i = 0; i < 5; i++) {
-          ctx.beginPath();
-          ctx.arc(unit.x - 15 + i * 8, baseY, 6, 0, Math.PI * 2);
-          ctx.stroke();
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
         }
         
-        // Wood grain lines
-        ctx.strokeStyle = '#4a3319';
-        ctx.lineWidth = 1;
-        for (let i = 0; i < 8; i++) {
-          ctx.beginPath();
-          ctx.moveTo(unit.x - 25 + i * 6, baseY - 12);
-          ctx.lineTo(unit.x - 25 + i * 6, baseY + 12);
-          ctx.stroke();
+        .game-info {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 16px;
         }
         
-        // Bark texture
-        ctx.fillStyle = '#654321';
-        ctx.fillRect(unit.x - 25, baseY - 12, 50, 3);
-        ctx.fillRect(unit.x - 25, baseY + 9, 50, 3);
-      } else if (unit.name === 'Skeleton') {
-        // Skeleton body
-        ctx.fillStyle = '#F0E68C';
-        ctx.fillRect(unit.x - 4, baseY - 2, 8, 12);
-        
-        // Head (skull)
-        ctx.fillStyle = '#FFF8DC';
-        ctx.beginPath();
-        ctx.arc(unit.x, baseY - 8, 5, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Eye sockets
-        ctx.fillStyle = '#000';
-        ctx.beginPath();
-        ctx.arc(unit.x - 2, baseY - 9, 1.5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(unit.x + 2, baseY - 9, 1.5, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Sword
-        ctx.fillStyle = '#C0C0C0';
-        ctx.fillRect(unit.x + 5, baseY - 5, 2, 10);
-        ctx.fillStyle = '#8B4513';
-        ctx.fillRect(unit.x + 4, baseY + 5, 4, 2);
-      } else if (unit.name === 'Balloon') {
-        // Balloon
-        ctx.fillStyle = '#87CEEB';
-        ctx.beginPath();
-        ctx.arc(unit.x, baseY - 15, 12, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Balloon highlight
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-        ctx.beginPath();
-        ctx.arc(unit.x - 4, baseY - 18, 5, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Rope
-        ctx.strokeStyle = '#654321';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(unit.x, baseY - 3);
-        ctx.lineTo(unit.x, baseY + 5);
-        ctx.stroke();
-        
-        // Basket
-        ctx.fillStyle = '#8B4513';
-        ctx.fillRect(unit.x - 6, baseY + 5, 12, 8);
-        
-        // Basket weave
-        ctx.strokeStyle = '#654321';
-        ctx.lineWidth = 1;
-        for (let i = 0; i < 3; i++) {
-          ctx.beginPath();
-          ctx.moveTo(unit.x - 6, baseY + 7 + i * 2);
-          ctx.lineTo(unit.x + 6, baseY + 7 + i * 2);
-          ctx.stroke();
-        }
-      }
-    };
-
-    units.forEach(unit => {
-      if (unit.hp > 0) {
-        if (unit.isAerial) {
-          // Draw shadow for aerial units
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
-          ctx.beginPath();
-          ctx.ellipse(unit.x, unit.y + 20, 12, 6, 0, 0, Math.PI * 2);
-          ctx.fill();
+        .info-box {
+            background-color: #8b5cf6;
+            padding: 8px 16px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
-        drawUnitModel(unit);
-
-        // HP bar
-        ctx.fillStyle = '#000';
-        ctx.fillRect(unit.x - 15, unit.y - 25, 30, 4);
-        ctx.fillStyle = '#00FF00';
-        ctx.fillRect(unit.x - 15, unit.y - 25, 30 * (unit.hp / unit.maxHP), 4);
-      }
-    });
-
-    projectiles.forEach(proj => {
-      ctx.fillStyle = proj.color;
-      ctx.beginPath();
-      ctx.arc(proj.x, proj.y, 5, 0, Math.PI * 2);
-      ctx.fill();
-      
-      ctx.strokeStyle = proj.color;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(proj.x, proj.y);
-      const angle = Math.atan2(proj.targetY - proj.y, proj.targetX - proj.x);
-      ctx.lineTo(proj.x - Math.cos(angle) * 10, proj.y - Math.sin(angle) * 10);
-      ctx.stroke();
-    });
-
-    clashEffects.forEach(effect => {
-      const age = Date.now() - effect.time;
-      const opacity = 1 - (age / 300);
-      const size = 10 + (age / 300) * 20;
-      
-      ctx.strokeStyle = `rgba(255, 255, 0, ${opacity})`;
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(effect.x, effect.y, size, 0, Math.PI * 2);
-      ctx.stroke();
-    });
-
-    if (gameOver) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      ctx.fillStyle = winner === 'player' ? '#FFD700' : '#FF0000';
-      ctx.font = 'bold 48px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText(winner === 'player' ? 'VICTORY!' : 'DEFEAT!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
-    }
-  }, [units, projectiles, clashEffects, playerTowerHP, enemyTowerHP, playerKingHP, enemyKingHP, gameOver, winner]);
-
-  const deployUnit = (card, x, y, team) => {
-    if (card.name === 'SkeletonArmy') {
-      for (let i = 0; i < card.count; i++) {
-        const offsetX = (Math.random() - 0.5) * 60;
-        const offsetY = (Math.random() - 0.5) * 60;
-        const newUnit = {
-          id: Date.now() + Math.random() + i,
-          name: 'Skeleton',
-          x: x + offsetX,
-          y: y + offsetY,
-          hp: card.hp,
-          maxHP: card.hp,
-          damage: card.damage,
-          speed: card.speed,
-          range: card.range,
-          team,
-          lastAttack: 0,
-          type: card.type,
-          isAerial: card.isAerial,
-          color: card.color,
-        };
-        setUnits(prev => [...prev, newUnit]);
-      }
-    } else if (card.name === 'Log') {
-      // Log is a spell that rolls forward
-      const newUnit = {
-        id: Date.now() + Math.random(),
-        name: card.name,
-        x,
-        y,
-        hp: card.hp,
-        maxHP: card.hp,
-        damage: card.damage,
-        speed: card.speed,
-        range: card.range,
-        team,
-        lastAttack: 0,
-        type: card.type,
-        isAerial: card.isAerial,
-        color: card.color,
-        lifetime: card.lifetime,
-        spawnTime: Date.now(),
-      };
-      setUnits(prev => [...prev, newUnit]);
-    } else {
-      const newUnit = {
-        id: Date.now() + Math.random(),
-        name: card.name,
-        x,
-        y,
-        hp: card.hp,
-        maxHP: card.hp,
-        damage: card.damage,
-        speed: card.speed,
-        range: card.range,
-        team,
-        lastAttack: 0,
-        type: card.type,
-        targetPriority: card.targetPriority,
-        keepDistance: card.keepDistance,
-        isAerial: card.isAerial,
-        color: card.color,
-        dropsSkeleton: card.dropsSkeleton,
-        splash: card.splash,
-      };
-      setUnits(prev => [...prev, newUnit]);
-    }
-  };
-
-  const handleCanvasClick = (e) => {
-    if (!selectedCard || gameOver) return;
-    
-    const rect = canvasRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    if (y > BRIDGE_Y + 20 && y < 760 && elixir >= selectedCard.cost) {
-      const unitCount = units.filter(u => u.team === 'player' && u.name === selectedCard.name).length;
-      
-      if (unitCount >= 4) {
-        return;
-      }
-
-      deployUnit(selectedCard, x, y, 'player');
-      setElixir(prev => prev - selectedCard.cost);
-      
-      const cardIndex = hand.findIndex(c => c.id === selectedCard.id);
-      if (cardIndex !== -1) {
-        const newHand = [...hand];
-        const usedCardIds = new Set(newHand.map(c => c.id));
-        const availableCards = allCards.filter(c => !usedCardIds.has(c.id));
-        
-        if (availableCards.length > 0) {
-          const newCard = availableCards[Math.floor(Math.random() * availableCards.length)];
-          newHand[cardIndex] = newCard;
-          setHand(newHand);
-          
-          // Update deck to remove the drawn card and add back the used card
-          const newDeck = deck.filter(c => c.id !== newCard.id);
-          if (!newDeck.some(c => c.id === selectedCard.id)) {
-            newDeck.push(selectedCard);
-          }
-          setDeck(newDeck);
+        .timer-box {
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-weight: bold;
         }
-      }
-      
-      setSelectedCard(null);
-    }
-  };
-
-  const resetGame = () => {
-    setUnits([]);
-    setProjectiles([]);
-    setClashEffects([]);
-    setElixir(5);
-    setEnemyElixir(5);
-    setElixirRate(2000);
-    setPlayerTowerHP(2500);
-    setEnemyTowerHP(2500);
-    setPlayerKingHP(4000);
-    setEnemyKingHP(4000);
-    setGameOver(false);
-    setWinner(null);
-    setSelectedCard(null);
-    setGameTime(90);
-    setIsOvertime(false);
-    setOvertimeTime(180);
-    
-    towers.current = {
-      playerLeft: { x: 100, y: 720, hp: 2500, maxHP: 2500, destroyed: false },
-      playerRight: { x: 500, y: 720, hp: 2500, maxHP: 2500, destroyed: false },
-      playerKing: { x: 300, y: 820, hp: 4000, maxHP: 4000 },
-      enemyLeft: { x: 100, y: 180, hp: 2500, maxHP: 2500, destroyed: false },
-      enemyRight: { x: 500, y: 180, hp: 2500, maxHP: 2500, destroyed: false },
-      enemyKing: { x: 300, y: 80, hp: 4000, maxHP: 4000 },
-    };
-    
-    // Initialize tower archers
-    setTowerArchers([
-      { id: 'pl', towerId: 'playerLeft', x: 100, y: 665, team: 'player', lastShot: 0 },
-      { id: 'pr', towerId: 'playerRight', x: 500, y: 665, team: 'player', lastShot: 0 },
-      { id: 'el', towerId: 'enemyLeft', x: 100, y: 125, team: 'enemy', lastShot: 0 },
-      { id: 'er', towerId: 'enemyRight', x: 500, y: 125, team: 'enemy', lastShot: 0 },
-    ]);
-    
-    const shuffled = [...allCards].sort(() => Math.random() - 0.5);
-    setDeck(shuffled.slice(4));
-    setHand(shuffled.slice(0, 4));
-  };
-
-  return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-slate-800 to-slate-900 p-4">
-      <div className="mb-4 flex items-center gap-4">
-        <div className="bg-purple-600 px-4 py-2 rounded-lg flex items-center gap-2">
-          <Crown className="w-5 h-5 text-yellow-300" />
-          <span className="text-white font-bold">Elixir: {elixir}/{ELIXIR_MAX}</span>
-          {elixirRate === 1000 && <span className="text-yellow-300 text-xs">x2</span>}
+        
+        .timer-normal {
+            background-color: #475569;
+        }
+        
+        .timer-overtime {
+            background-color: #dc2626;
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        
+        .enemy-info {
+            background-color: #475569;
+            padding: 8px 16px;
+            border-radius: 8px;
+        }
+        
+        canvas {
+            border: 4px solid #ca8a04;
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            cursor: crosshair;
+        }
+        
+        .card-container {
+            display: flex;
+            gap: 12px;
+            margin-top: 16px;
+        }
+        
+        .card {
+            position: relative;
+            padding: 16px;
+            border-radius: 8px;
+            border: 2px solid #475569;
+            transition: all 0.2s;
+            background: linear-gradient(to bottom, #475569, #374151);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-width: 80px;
+        }
+        
+        .card:hover {
+            transform: scale(1.05);
+        }
+        
+        .card.selected {
+            border-color: #fbbf24;
+            transform: scale(1.1);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        }
+        
+        .card.disabled {
+            background-color: #1f2937;
+            opacity: 0.5;
+        }
+        
+        .card-cost {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            background-color: #8b5cf6;
+            color: white;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .card-name {
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+            margin-top: 4px;
+        }
+        
+        .max-indicator {
+            color: #f87171;
+            font-size: 10px;
+        }
+        
+        .reset-button {
+            margin-top: 16px;
+            background-color: #16a34a;
+            color: white;
+            font-weight: bold;
+            padding: 12px 24px;
+            border-radius: 8px;
+            border: none;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .reset-button:hover {
+            background-color: #15803d;
+        }
+        
+        .instructions {
+            margin-top: 16px;
+            text-align: center;
+            color: #94a3b8;
+            font-size: 14px;
+            max-width: 500px;
+        }
+        
+        .icon {
+            width: 32px;
+            height: 32px;
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="game-info">
+            <div class="info-box">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"></path>
+                </svg>
+                <span>Elixir: <span id="elixir-count">5</span>/10</span>
+                <span id="elixir-boost" style="display: none; color: #fbbf24; font-size: 12px;">x2</span>
+            </div>
+            <div class="timer-box timer-normal" id="timer">
+                Time: 1:30
+            </div>
+            <div class="enemy-info">
+                Enemy King: <span id="enemy-king-hp">4000</span>
+            </div>
         </div>
-        <div className={`px-4 py-2 rounded-lg font-bold ${isOvertime ? 'bg-red-600 text-white animate-pulse' : 'bg-slate-700 text-white'}`}>
-          {isOvertime ? 'OVERTIME!' : 'Time'}: {Math.floor((isOvertime ? overtimeTime : gameTime) / 60)}:{((isOvertime ? overtimeTime : gameTime) % 60).toString().padStart(2, '0')}
+        
+        <canvas id="game-canvas" width="600" height="900"></canvas>
+        
+        <div class="card-container" id="card-container">
+            <!-- Cards will be added here by JavaScript -->
         </div>
-        <div className="bg-slate-700 px-4 py-2 rounded-lg">
-          <span className="text-white font-bold">Enemy King: {Math.max(0, enemyKingHP)}</span>
+        
+        <button class="reset-button" id="reset-button" style="display: none;">Play Again</button>
+        
+        <div class="instructions">
+            <p>Click a card, then click behind your bridge to deploy! (Log can be deployed anywhere)</p>
+            <p>Side towers have priority - destroy them first! Max 4 of each unit.</p>
         </div>
-      </div>
-
-      <canvas
-        ref={canvasRef}
-        width={CANVAS_WIDTH}
-        height={CANVAS_HEIGHT}
-        onClick={handleCanvasClick}
-        className="border-4 border-yellow-600 rounded-lg shadow-2xl cursor-crosshair"
-      />
-
-      <div className="mt-4 flex gap-3">
-        {hand.map((card, idx) => {
-          const Icon = card.icon;
-          const canAfford = elixir >= card.cost;
-          const unitCount = units.filter(u => u.team === 'player' && u.name === card.name).length;
-          const atLimit = unitCount >= 4;
-          
-          return (
-            <button
-              key={`${card.id}-${idx}`}
-              onClick={() => canAfford && !atLimit && setSelectedCard(card)}
-              disabled={!canAfford || atLimit}
-              className={`relative p-4 rounded-lg border-2 transition-all ${
-                selectedCard?.id === card.id
-                  ? 'border-yellow-400 scale-110 shadow-lg'
-                  : 'border-slate-600'
-              } ${
-                canAfford && !atLimit
-                  ? 'bg-gradient-to-b from-slate-700 to-slate-800 hover:scale-105'
-                  : 'bg-slate-900 opacity-50'
-              }`}
-            >
-              <Icon className="w-8 h-8 mb-1" style={{ color: card.color }} />
-              <div className="text-white text-xs font-bold">{card.name}</div>
-              {atLimit && <div className="text-red-400 text-xs">MAX</div>}
-              <div className="absolute -top-2 -right-2 bg-purple-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold">
-                {card.cost}
-              </div>
-            </button>
-          );
-        })}
-      </div>
-
-      {gameOver && (
-        <button
-          onClick={resetGame}
-          className="mt-4 bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg text-lg transition-all"
-        >
-          Play Again
-        </button>
-      )}
-
-      <div className="mt-4 text-center text-slate-400 text-sm max-w-md">
-        <p>Click a card, then click behind your bridge to deploy! (Log can be deployed anywhere)</p>
-        <p>Side towers have priority - destroy them first! Max 4 of each unit.</p>
-      </div>
     </div>
-  );
-};
 
-export default ClashRoyaleGame;
+    <script>
+        // Game constants
+        const CANVAS_WIDTH = 600;
+        const CANVAS_HEIGHT = 900;
+        const ELIXIR_MAX = 10;
+        const BRIDGE_Y = 450;
+        const LEFT_BRIDGE_START = 50;
+        const LEFT_BRIDGE_END = 250;
+        const RIGHT_BRIDGE_START = 350;
+        const RIGHT_BRIDGE_END = 550;
+
+        // Game state
+        let elixir = 5;
+        let enemyElixir = 5;
+        let elixirRate = 2000;
+        let playerTowerHP = 2500;
+        let enemyTowerHP = 2500;
+        let playerKingHP = 4000;
+        let enemyKingHP = 4000;
+        let units = [];
+        let projectiles = [];
+        let towerArchers = [];
+        let clashEffects = [];
+        let selectedCard = null;
+        let gameOver = false;
+        let winner = null;
+        let hand = [];
+        let deck = [];
+        let gameTime = 90;
+        let isOvertime = false;
+        let overtimeTime = 180;
+
+        // Card definitions
+        const allCards = [
+            { id: 1, name: 'Knight', cost: 3, hp: 150, damage: 20, speed: 1, range: 30, color: '#8B4513', type: 'melee', targetPriority: 'units', isAerial: false },
+            { id: 2, name: 'Archer', cost: 3, hp: 80, damage: 15, speed: 1.2, range: 150, color: '#9370DB', type: 'ranged', keepDistance: 120, isAerial: false },
+            { id: 3, name: 'Giant', cost: 5, hp: 500, damage: 35, speed: 0.6, range: 30, color: '#FF6347', type: 'tank', targetPriority: 'buildings', isAerial: false },
+            { id: 4, name: 'Wizard', cost: 5, hp: 150, damage: 40, speed: 1, range: 200, color: '#4169E1', type: 'ranged', keepDistance: 150, isAerial: false },
+            { id: 5, name: 'Dragon', cost: 4, hp: 200, damage: 25, speed: 1.5, range: 50, color: '#FF4500', type: 'ranged', isAerial: true },
+            { id: 6, name: 'HogRider', cost: 4, hp: 180, damage: 22, speed: 2, range: 30, color: '#D2691E', type: 'melee', targetPriority: 'buildings', isAerial: false },
+            { id: 7, name: 'SkeletonArmy', cost: 3, hp: 20, damage: 10, speed: 1.5, range: 25, color: '#F0E68C', type: 'melee', count: 5, isAerial: false },
+            { id: 8, name: 'Balloon', cost: 5, hp: 250, damage: 30, speed: 0.8, range: 180, color: '#87CEEB', type: 'ranged', keepDistance: 120, isAerial: true, dropsSkeleton: true },
+            { id: 9, name: 'MegaKnight', cost: 7, hp: 450, damage: 45, speed: 1.2, range: 35, color: '#2C3E50', type: 'melee', targetPriority: 'units', isAerial: false, splash: true },
+            { id: 10, name: 'MiniPEKKA', cost: 4, hp: 220, damage: 50, speed: 1.3, range: 30, color: '#34495E', type: 'melee', targetPriority: 'units', isAerial: false },
+            { id: 11, name: 'Log', cost: 2, hp: 9999, damage: 35, speed: 4, range: 30, color: '#8B4513', type: 'spell', isAerial: false, lifetime: 1500 },
+        ];
+
+        // Towers
+        const towers = {
+            playerLeft: { x: 100, y: 720, hp: 2500, maxHP: 2500, destroyed: false },
+            playerRight: { x: 500, y: 720, hp: 2500, maxHP: 2500, destroyed: false },
+            playerKing: { x: 300, y: 820, hp: 4000, maxHP: 4000 },
+            enemyLeft: { x: 100, y: 180, hp: 2500, maxHP: 2500, destroyed: false },
+            enemyRight: { x: 500, y: 180, hp: 2500, maxHP: 2500, destroyed: false },
+            enemyKing: { x: 300, y: 80, hp: 4000, maxHP: 4000 },
+        };
+
+        // DOM elements
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const elixirCount = document.getElementById('elixir-count');
+        const enemyKingHP = document.getElementById('enemy-king-hp');
+        const timerElement = document.getElementById('timer');
+        const resetButton = document.getElementById('reset-button');
+        const cardContainer = document.getElementById('card-container');
+        const elixirBoost = document.getElementById('elixir-boost');
+
+        // Initialize the game
+        function initGame() {
+            // Initialize hand and deck
+            const shuffled = [...allCards].sort(() => Math.random() - 0.5);
+            deck = shuffled.slice(4);
+            hand = shuffled.slice(0, 4);
+            
+            // Initialize tower archers
+            towerArchers = [
+                { id: 'pl', towerId: 'playerLeft', x: 100, y: 665, team: 'player', lastShot: 0 },
+                { id: 'pr', towerId: 'playerRight', x: 500, y: 665, team: 'player', lastShot: 0 },
+                { id: 'el', towerId: 'enemyLeft', x: 100, y: 125, team: 'enemy', lastShot: 0 },
+                { id: 'er', towerId: 'enemyRight', x: 500, y: 125, team: 'enemy', lastShot: 0 },
+            ];
+            
+            // Start game loops
+            startElixirLoop();
+            startGameLoop();
+            startTimerLoop();
+            
+            // Render initial UI
+            renderCards();
+            updateUI();
+        }
+
+        // Elixir generation loop
+        function startElixirLoop() {
+            setInterval(() => {
+                elixir = Math.min(elixir + 1, ELIXIR_MAX);
+                enemyElixir = Math.min(enemyElixir + 1, ELIXIR_MAX);
+                updateUI();
+            }, elixirRate);
+        }
+
+        // Game timer
+        function startTimerLoop() {
+            setInterval(() => {
+                if (gameOver) return;
+                
+                if (!isOvertime && gameTime > 0) {
+                    gameTime--;
+                } else if (!isOvertime && gameTime === 0) {
+                    isOvertime = true;
+                    elixirRate = 1000;
+                    elixirBoost.style.display = 'inline';
+                } else if (isOvertime && overtimeTime > 0) {
+                    overtimeTime--;
+                } else if (isOvertime && overtimeTime === 0) {
+                    endGameByDamage();
+                }
+                
+                updateUI();
+            }, 1000);
+        }
+
+        // Main game loop
+        function startGameLoop() {
+            setInterval(() => {
+                if (gameOver) return;
+                
+                // Tower archers shoot at nearby enemies
+                towerArchers.forEach(archer => {
+                    const tower = towers[archer.towerId];
+                    if (!tower || tower.hp <= 0) return;
+                    
+                    // Find nearest enemy unit
+                    let nearestEnemy = null;
+                    let minDist = Infinity;
+                    
+                    units.forEach(unit => {
+                        if (unit.team !== archer.team && unit.hp > 0) {
+                            const dist = Math.hypot(unit.x - archer.x, unit.y - archer.y);
+                            if (dist < 200 && dist < minDist) {
+                                minDist = dist;
+                                nearestEnemy = unit;
+                            }
+                        }
+                    });
+                    
+                    // Shoot at enemy
+                    if (nearestEnemy && (!archer.lastShot || Date.now() - archer.lastShot > 1500)) {
+                        projectiles.push({
+                            id: Date.now() + Math.random(),
+                            x: archer.x,
+                            y: archer.y,
+                            targetX: nearestEnemy.x,
+                            targetY: nearestEnemy.y,
+                            target: nearestEnemy,
+                            damage: 15,
+                            speed: 5,
+                            color: '#9370DB',
+                            isTowerArcher: true,
+                        });
+                        archer.lastShot = Date.now();
+                    }
+                });
+
+                // Update units
+                units = units.filter(unit => {
+                    if (unit.hp <= 0) {
+                        if (unit.dropsSkeleton) {
+                            for (let i = 0; i < 2; i++) {
+                                setTimeout(() => {
+                                    const newUnit = {
+                                        id: Date.now() + Math.random(),
+                                        name: 'Skeleton',
+                                        x: unit.x + (Math.random() - 0.5) * 40,
+                                        y: unit.y,
+                                        hp: 20,
+                                        maxHP: 20,
+                                        damage: 10,
+                                        speed: 1.5,
+                                        range: 25,
+                                        team: unit.team,
+                                        lastAttack: 0,
+                                        type: 'melee',
+                                        isAerial: false,
+                                        color: '#F0E68C',
+                                    };
+                                    units.push(newUnit);
+                                }, i * 100);
+                            }
+                        }
+                        return false;
+                    }
+                    return true;
+                });
+
+                // Update projectiles
+                projectiles = projectiles.filter(proj => {
+                    const dx = proj.targetX - proj.x;
+                    const dy = proj.targetY - proj.y;
+                    const dist = Math.hypot(dx, dy);
+
+                    if (dist < proj.speed) {
+                        if (proj.target.hp !== undefined) {
+                            proj.target.hp -= proj.damage;
+                            
+                            Object.entries(towers).forEach(([key, tower]) => {
+                                if (tower === proj.target) {
+                                    if (key === 'playerKing') playerKingHP = proj.target.hp;
+                                    if (key === 'enemyKing') enemyKingHP = proj.target.hp;
+                                    if (key === 'playerLeft' || key === 'playerRight') {
+                                        playerTowerHP = proj.target.hp;
+                                        if (proj.target.hp <= 0) tower.destroyed = true;
+                                    }
+                                    if (key === 'enemyLeft' || key === 'enemyRight') {
+                                        enemyTowerHP = proj.target.hp;
+                                        if (proj.target.hp <= 0) tower.destroyed = true;
+                                    }
+                                }
+                            });
+                        } else {
+                            proj.target.hp -= proj.damage;
+                        }
+                        return false;
+                    }
+
+                    proj.x += (dx / dist) * proj.speed;
+                    proj.y += (dy / dist) * proj.speed;
+                    return true;
+                });
+
+                // Update clash effects
+                clashEffects = clashEffects.filter(e => Date.now() - e.time < 300);
+
+                // Enemy AI deployment
+                if (enemyElixir >= 4 && Math.random() > 0.988) {
+                    const availableCards = allCards.filter(card => {
+                        const count = units.filter(u => u.team === 'enemy' && u.name === card.name).length;
+                        return count < 4 && enemyElixir >= card.cost;
+                    });
+                    
+                    if (availableCards.length > 0) {
+                        const card = availableCards[Math.floor(Math.random() * availableCards.length)];
+                        const x = Math.random() * (CANVAS_WIDTH - 100) + 50;
+                        const y = Math.random() * 150 + 50;
+                        deployUnit(card, x, y, 'enemy');
+                        enemyElixir -= card.cost;
+                    }
+                }
+
+                // Check for game over conditions
+                if (towers.playerKing.hp <= 0 && !gameOver) {
+                    gameOver = true;
+                    winner = 'enemy';
+                    resetButton.style.display = 'block';
+                }
+                if (towers.enemyKing.hp <= 0 && !gameOver) {
+                    gameOver = true;
+                    winner = 'player';
+                    resetButton.style.display = 'block';
+                }
+                
+                // Update UI
+                updateUI();
+                renderGame();
+            }, 50);
+        }
+
+        // End game by damage comparison
+        function endGameByDamage() {
+            const playerDamage = (2500 - towers.playerLeft.hp) + 
+                                 (2500 - towers.playerRight.hp) + 
+                                 (4000 - towers.playerKing.hp);
+            
+            const enemyDamage = (2500 - towers.enemyLeft.hp) + 
+                                (2500 - towers.enemyRight.hp) + 
+                                (4000 - towers.enemyKing.hp);
+            
+            gameOver = true;
+            if (enemyDamage > playerDamage) {
+                winner = 'player';
+            } else if (playerDamage > enemyDamage) {
+                winner = 'enemy';
+            } else {
+                winner = 'draw';
+            }
+            resetButton.style.display = 'block';
+        }
+
+        // Deploy a unit
+        function deployUnit(card, x, y, team) {
+            if (card.name === 'SkeletonArmy') {
+                for (let i = 0; i < card.count; i++) {
+                    const offsetX = (Math.random() - 0.5) * 60;
+                    const offsetY = (Math.random() - 0.5) * 60;
+                    const newUnit = {
+                        id: Date.now() + Math.random() + i,
+                        name: 'Skeleton',
+                        x: x + offsetX,
+                        y: y + offsetY,
+                        hp: card.hp,
+                        maxHP: card.hp,
+                        damage: card.damage,
+                        speed: card.speed,
+                        range: card.range,
+                        team,
+                        lastAttack: 0,
+                        type: card.type,
+                        isAerial: card.isAerial,
+                        color: card.color,
+                    };
+                    units.push(newUnit);
+                }
+            } else if (card.name === 'Log') {
+                // Log is a spell that rolls forward
+                const newUnit = {
+                    id: Date.now() + Math.random(),
+                    name: card.name,
+                    x,
+                    y,
+                    hp: card.hp,
+                    maxHP: card.hp,
+                    damage: card.damage,
+                    speed: card.speed,
+                    range: card.range,
+                    team,
+                    lastAttack: 0,
+                    type: card.type,
+                    isAerial: card.isAerial,
+                    color: card.color,
+                    lifetime: card.lifetime,
+                    spawnTime: Date.now(),
+                };
+                units.push(newUnit);
+            } else {
+                const newUnit = {
+                    id: Date.now() + Math.random(),
+                    name: card.name,
+                    x,
+                    y,
+                    hp: card.hp,
+                    maxHP: card.hp,
+                    damage: card.damage,
+                    speed: card.speed,
+                    range: card.range,
+                    team,
+                    lastAttack: 0,
+                    type: card.type,
+                    targetPriority: card.targetPriority,
+                    keepDistance: card.keepDistance,
+                    isAerial: card.isAerial,
+                    color: card.color,
+                    dropsSkeleton: card.dropsSkeleton,
+                    splash: card.splash,
+                };
+                units.push(newUnit);
+            }
+        }
+
+        // Handle canvas click
+        function handleCanvasClick(e) {
+            if (!selectedCard || gameOver) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            if (y > BRIDGE_Y + 20 && y < 760 && elixir >= selectedCard.cost) {
+                const unitCount = units.filter(u => u.team === 'player' && u.name === selectedCard.name).length;
+                
+                if (unitCount >= 4) {
+                    return;
+                }
+
+                deployUnit(selectedCard, x, y, 'player');
+                elixir -= selectedCard.cost;
+                
+                const cardIndex = hand.findIndex(c => c.id === selectedCard.id);
+                if (cardIndex !== -1) {
+                    const usedCardIds = new Set(hand.map(c => c.id));
+                    const availableCards = allCards.filter(c => !usedCardIds.has(c.id));
+                    
+                    if (availableCards.length > 0) {
+                        const newCard = availableCards[Math.floor(Math.random() * availableCards.length)];
+                        hand[cardIndex] = newCard;
+                        
+                        // Update deck to remove the drawn card and add back the used card
+                        deck = deck.filter(c => c.id !== newCard.id);
+                        if (!deck.some(c => c.id === selectedCard.id)) {
+                            deck.push(selectedCard);
+                        }
+                    }
+                }
+                
+                selectedCard = null;
+                renderCards();
+                updateUI();
+            }
+        }
+
+        // Reset the game
+        function resetGame() {
+            units = [];
+            projectiles = [];
+            clashEffects = [];
+            elixir = 5;
+            enemyElixir = 5;
+            elixirRate = 2000;
+            playerTowerHP = 2500;
+            enemyTowerHP = 2500;
+            playerKingHP = 4000;
+            enemyKingHP = 4000;
+            gameOver = false;
+            winner = null;
+            selectedCard = null;
+            gameTime = 90;
+            isOvertime = false;
+            overtimeTime = 180;
+            
+            // Reset towers
+            Object.assign(towers, {
+                playerLeft: { x: 100, y: 720, hp: 2500, maxHP: 2500, destroyed: false },
+                playerRight: { x: 500, y: 720, hp: 2500, maxHP: 2500, destroyed: false },
+                playerKing: { x: 300, y: 820, hp: 4000, maxHP: 4000 },
+                enemyLeft: { x: 100, y: 180, hp: 2500, maxHP: 2500, destroyed: false },
+                enemyRight: { x: 500, y: 180, hp: 2500, maxHP: 2500, destroyed: false },
+                enemyKing: { x: 300, y: 80, hp: 4000, maxHP: 4000 },
+            });
+            
+            // Initialize tower archers
+            towerArchers = [
+                { id: 'pl', towerId: 'playerLeft', x: 100, y: 665, team: 'player', lastShot: 0 },
+                { id: 'pr', towerId: 'playerRight', x: 500, y: 665, team: 'player', lastShot: 0 },
+                { id: 'el', towerId: 'enemyLeft', x: 100, y: 125, team: 'enemy', lastShot: 0 },
+                { id: 'er', towerId: 'enemyRight', x: 500, y: 125, team: 'enemy', lastShot: 0 },
+            ];
+            
+            // Reset hand and deck
+            const shuffled = [...allCards].sort(() => Math.random() - 0.5);
+            deck = shuffled.slice(4);
+            hand = shuffled.slice(0, 4);
+            
+            resetButton.style.display = 'none';
+            elixirBoost.style.display = 'none';
+            renderCards();
+            updateUI();
+        }
+
+        // Render the game
+        function renderGame() {
+            ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+            // Draw background
+            ctx.fillStyle = '#2d5016';
+            ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+            // Draw water
+            ctx.fillStyle = '#4A90E2';
+            ctx.fillRect(0, BRIDGE_Y - 50, CANVAS_WIDTH, 100);
+            
+            // Draw bridges
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(100, BRIDGE_Y - 30, 100, 60);
+            ctx.fillRect(400, BRIDGE_Y - 30, 100, 60);
+
+            // Draw towers
+            drawTower(towers.enemyLeft, '#ff4444', towers.enemyLeft.destroyed);
+            drawTower(towers.enemyRight, '#ff4444', towers.enemyRight.destroyed);
+            drawTower(towers.enemyKing, '#cc0000', false);
+            drawTower(towers.playerLeft, '#4444ff', towers.playerLeft.destroyed);
+            drawTower(towers.playerRight, '#4444ff', towers.playerRight.destroyed);
+            drawTower(towers.playerKing, '#0000cc', false);
+
+            // Draw units
+            units.forEach(unit => {
+                if (unit.hp > 0) {
+                    if (unit.isAerial) {
+                        // Draw shadow for aerial units
+                        ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+                        ctx.beginPath();
+                        ctx.ellipse(unit.x, unit.y + 20, 12, 6, 0, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    
+                    drawUnitModel(unit);
+
+                    // HP bar
+                    ctx.fillStyle = '#000';
+                    ctx.fillRect(unit.x - 15, unit.y - 25, 30, 4);
+                    ctx.fillStyle = '#00FF00';
+                    ctx.fillRect(unit.x - 15, unit.y - 25, 30 * (unit.hp / unit.maxHP), 4);
+                }
+            });
+
+            // Draw projectiles
+            projectiles.forEach(proj => {
+                ctx.fillStyle = proj.color;
+                ctx.beginPath();
+                ctx.arc(proj.x, proj.y, 5, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.strokeStyle = proj.color;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(proj.x, proj.y);
+                const angle = Math.atan2(proj.targetY - proj.y, proj.targetX - proj.x);
+                ctx.lineTo(proj.x - Math.cos(angle) * 10, proj.y - Math.sin(angle) * 10);
+                ctx.stroke();
+            });
+
+            // Draw clash effects
+            clashEffects.forEach(effect => {
+                const age = Date.now() - effect.time;
+                const opacity = 1 - (age / 300);
+                const size = 10 + (age / 300) * 20;
+                
+                ctx.strokeStyle = `rgba(255, 255, 0, ${opacity})`;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(effect.x, effect.y, size, 0, Math.PI * 2);
+                ctx.stroke();
+            });
+
+            // Draw game over screen
+            if (gameOver) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                ctx.fillStyle = winner === 'player' ? '#FFD700' : '#FF0000';
+                ctx.font = 'bold 48px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(winner === 'player' ? 'VICTORY!' : 'DEFEAT!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+            }
+        }
+
+        // Draw a tower
+        function drawTower(tower, color, destroyed, isKing) {
+            if (tower.hp > 0) {
+                if (isKing) {
+                    // King Castle - larger and more ornate
+                    // Castle base/walls
+                    ctx.fillStyle = '#5a5a5a';
+                    ctx.fillRect(tower.x - 40, tower.y - 10, 80, 35);
+                    
+                    // Main castle keep
+                    const gradient = ctx.createLinearGradient(tower.x - 35, tower.y - 50, tower.x + 35, tower.y - 50);
+                    gradient.addColorStop(0, color);
+                    gradient.addColorStop(0.5, color);
+                    gradient.addColorStop(1, '#000');
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(tower.x - 35, tower.y - 50, 70, 65);
+                    
+                    // Stone brick pattern
+                    ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+                    ctx.lineWidth = 1;
+                    for (let i = 0; i < 6; i++) {
+                        ctx.beginPath();
+                        ctx.moveTo(tower.x - 35, tower.y - 50 + i * 12);
+                        ctx.lineTo(tower.x + 35, tower.y - 50 + i * 12);
+                        ctx.stroke();
+                    }
+                    for (let i = 0; i < 5; i++) {
+                        ctx.beginPath();
+                        ctx.moveTo(tower.x - 35 + i * 18, tower.y - 50);
+                        ctx.lineTo(tower.x - 35 + i * 18, tower.y + 15);
+                        ctx.stroke();
+                    }
+                    
+                    // Battlements/crenellations
+                    ctx.fillStyle = color;
+                    for (let i = 0; i < 7; i++) {
+                        if (i % 2 === 0) {
+                            ctx.fillRect(tower.x - 35 + i * 10, tower.y - 60, 10, 10);
+                        }
+                    }
+                    
+                    // Castle towers on sides
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(tower.x - 45, tower.y - 40, 12, 55);
+                    ctx.fillRect(tower.x + 33, tower.y - 40, 12, 55);
+                    
+                    // Tower tops
+                    ctx.fillStyle = '#8B4513';
+                    ctx.beginPath();
+                    ctx.moveTo(tower.x - 48, tower.y - 40);
+                    ctx.lineTo(tower.x - 39, tower.y - 50);
+                    ctx.lineTo(tower.x - 30, tower.y - 40);
+                    ctx.closePath();
+                    ctx.fill();
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(tower.x + 30, tower.y - 40);
+                    ctx.lineTo(tower.x + 39, tower.y - 50);
+                    ctx.lineTo(tower.x + 48, tower.y - 40);
+                    ctx.closePath();
+                    ctx.fill();
+                    
+                    // Windows
+                    ctx.fillStyle = '#FFD700';
+                    ctx.fillRect(tower.x - 20, tower.y - 35, 10, 15);
+                    ctx.fillRect(tower.x + 10, tower.y - 35, 10, 15);
+                    ctx.fillRect(tower.x - 5, tower.y - 20, 10, 15);
+                    
+                    // Door
+                    ctx.fillStyle = '#654321';
+                    ctx.fillRect(tower.x - 12, tower.y, 24, 20);
+                    ctx.strokeStyle = '#000';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(tower.x - 12, tower.y, 24, 20);
+                } else {
+                    // Side Tower/Castle - smaller but still castle-like
+                    // Castle base
+                    ctx.fillStyle = '#5a5a5a';
+                    ctx.fillRect(tower.x - 35, tower.y - 5, 70, 30);
+                    
+                    // Main tower body
+                    const gradient = ctx.createLinearGradient(tower.x - 30, tower.y - 45, tower.x + 30, tower.y - 45);
+                    gradient.addColorStop(0, color);
+                    gradient.addColorStop(0.5, color);
+                    gradient.addColorStop(1, '#000');
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(tower.x - 30, tower.y - 45, 60, 65);
+                    
+                    // Stone brick lines
+                    ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+                    ctx.lineWidth = 1;
+                    for (let i = 0; i < 5; i++) {
+                        ctx.beginPath();
+                        ctx.moveTo(tower.x - 30, tower.y - 45 + i * 13);
+                        ctx.lineTo(tower.x + 30, tower.y - 45 + i * 13);
+                        ctx.stroke();
+                    }
+                    for (let i = 0; i < 4; i++) {
+                        ctx.beginPath();
+                        ctx.moveTo(tower.x - 30 + i * 20, tower.y - 45);
+                        ctx.lineTo(tower.x - 30 + i * 20, tower.y + 20);
+                        ctx.stroke();
+                    }
+                    
+                    // Battlements
+                    ctx.fillStyle = color;
+                    for (let i = 0; i < 6; i++) {
+                        if (i % 2 === 0) {
+                            ctx.fillRect(tower.x - 30 + i * 10, tower.y - 55, 10, 10);
+                        }
+                    }
+                    
+                    // Side turrets
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(tower.x - 38, tower.y - 35, 10, 50);
+                    ctx.fillRect(tower.x + 28, tower.y - 35, 10, 50);
+                    
+                    // Turret tops
+                    ctx.fillStyle = '#8B4513';
+                    ctx.beginPath();
+                    ctx.moveTo(tower.x - 40, tower.y - 35);
+                    ctx.lineTo(tower.x - 33, tower.y - 43);
+                    ctx.lineTo(tower.x - 26, tower.y - 35);
+                    ctx.closePath();
+                    ctx.fill();
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(tower.x + 26, tower.y - 35);
+                    ctx.lineTo(tower.x + 33, tower.y - 43);
+                    ctx.lineTo(tower.x + 40, tower.y - 35);
+                    ctx.closePath();
+                    ctx.fill();
+                    
+                    // Windows
+                    ctx.fillStyle = '#FFD700';
+                    ctx.fillRect(tower.x - 18, tower.y - 30, 8, 12);
+                    ctx.fillRect(tower.x + 10, tower.y - 30, 8, 12);
+                    ctx.fillRect(tower.x - 4, tower.y - 15, 8, 12);
+                    
+                    // Door
+                    ctx.fillStyle = '#654321';
+                    ctx.fillRect(tower.x - 10, tower.y + 5, 20, 18);
+                }
+                
+                // HP bar background
+                ctx.fillStyle = '#000';
+                ctx.fillRect(tower.x - 35, tower.y - 20, 70, 10);
+                ctx.fillStyle = '#FF0000';
+                const hpPercent = tower.hp / tower.maxHP;
+                ctx.fillRect(tower.x - 34, tower.y - 19, 68 * hpPercent, 8);
+                
+                // HP bar border
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(tower.x - 35, tower.y - 20, 70, 10);
+            } else if (destroyed) {
+                // Draw ruins
+                ctx.fillStyle = '#4a4a4a';
+                ctx.fillRect(tower.x - 20, tower.y - 20, 40, 40);
+                ctx.fillStyle = '#3a3a3a';
+                ctx.fillRect(tower.x - 15, tower.y - 15, 15, 30);
+                ctx.fillRect(tower.x + 5, tower.y - 10, 12, 25);
+                
+                // Broken stones
+                ctx.fillStyle = '#5a5a5a';
+                ctx.fillRect(tower.x - 25, tower.y + 5, 10, 8);
+                ctx.fillRect(tower.x + 15, tower.y + 8, 8, 6);
+                ctx.fillRect(tower.x - 5, tower.y + 10, 12, 7);
+                
+                // Animated fire effects
+                const time = Date.now();
+                for (let i = 0; i < 3; i++) {
+                    const offset = Math.sin(time / 200 + i) * 3;
+                    const fireY = tower.y - 25 + offset - i * 8;
+                    const fireSize = 8 + Math.sin(time / 150 + i * 2) * 3;
+                    
+                    // Orange flame
+                    ctx.fillStyle = `rgba(255, ${100 + Math.sin(time / 100 + i) * 50}, 0, ${0.6 + Math.sin(time / 180 + i) * 0.3})`;
+                    ctx.beginPath();
+                    ctx.arc(tower.x - 10 + i * 10, fireY, fireSize, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Yellow center
+                    ctx.fillStyle = `rgba(255, 255, 0, ${0.5 + Math.sin(time / 120 + i) * 0.3})`;
+                    ctx.beginPath();
+                    ctx.arc(tower.x - 10 + i * 10, fireY, fireSize * 0.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                // Smoke
+                ctx.fillStyle = `rgba(60, 60, 60, ${0.3 + Math.sin(time / 300) * 0.1})`;
+                ctx.beginPath();
+                ctx.arc(tower.x, tower.y - 35, 15 + Math.sin(time / 250) * 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // Draw a unit model
+        function drawUnitModel(unit) {
+            const baseY = unit.isAerial ? unit.y - 10 : unit.y;
+            const isEnemy = unit.team === 'enemy';
+            
+            if (unit.name === 'Knight') {
+                // Knight body
+                ctx.fillStyle = isEnemy ? '#DC143C' : '#4169E1';
+                ctx.fillRect(unit.x - 8, baseY - 5, 16, 18);
+                
+                // Armor shine
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+                ctx.fillRect(unit.x - 6, baseY - 3, 4, 14);
+                
+                // Head
+                ctx.fillStyle = '#FFD1A3';
+                ctx.beginPath();
+                ctx.arc(unit.x, baseY - 12, 7, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Helmet
+                ctx.fillStyle = '#808080';
+                ctx.beginPath();
+                ctx.arc(unit.x, baseY - 13, 7, Math.PI, Math.PI * 2);
+                ctx.fill();
+                
+                // Shield
+                ctx.fillStyle = '#C0C0C0';
+                ctx.beginPath();
+                ctx.arc(unit.x - 10, baseY + 3, 6, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Sword
+                ctx.fillStyle = '#A9A9A9';
+                ctx.fillRect(unit.x + 8, baseY - 8, 3, 15);
+                ctx.fillStyle = '#8B7355';
+                ctx.fillRect(unit.x + 7, baseY + 7, 5, 4);
+            } else if (unit.name === 'Archer') {
+                // Archer body
+                ctx.fillStyle = '#9370DB';
+                ctx.fillRect(unit.x - 6, baseY - 3, 12, 16);
+                
+                // Head
+                ctx.fillStyle = '#FFD1A3';
+                ctx.beginPath();
+                ctx.arc(unit.x, baseY - 10, 6, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Hood
+                ctx.fillStyle = '#6A5ACD';
+                ctx.beginPath();
+                ctx.moveTo(unit.x - 7, baseY - 10);
+                ctx.lineTo(unit.x, baseY - 16);
+                ctx.lineTo(unit.x + 7, baseY - 10);
+                ctx.fill();
+                
+                // Bow
+                ctx.strokeStyle = '#8B4513';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(unit.x + 8, baseY, 8, -Math.PI/2, Math.PI/2);
+                ctx.stroke();
+                
+                // Arrow
+                ctx.strokeStyle = '#654321';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(unit.x + 8, baseY);
+                ctx.lineTo(unit.x + 14, baseY);
+                ctx.stroke();
+            } else if (unit.name === 'Giant') {
+                // Giant body
+                ctx.fillStyle = '#FF6347';
+                ctx.fillRect(unit.x - 12, baseY - 10, 24, 30);
+                
+                // Belt
+                ctx.fillStyle = '#8B4513';
+                ctx.fillRect(unit.x - 12, baseY + 8, 24, 4);
+                
+                // Head
+                ctx.fillStyle = '#FFD1A3';
+                ctx.beginPath();
+                ctx.arc(unit.x, baseY - 22, 10, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Hair
+                ctx.fillStyle = '#654321';
+                ctx.fillRect(unit.x - 10, baseY - 28, 20, 6);
+                
+                // Arms
+                ctx.fillStyle = '#FFD1A3';
+                ctx.fillRect(unit.x - 16, baseY - 5, 5, 15);
+                ctx.fillRect(unit.x + 11, baseY - 5, 5, 15);
+            } else if (unit.name === 'Wizard') {
+                // Wizard robe
+                ctx.fillStyle = '#4169E1';
+                ctx.beginPath();
+                ctx.moveTo(unit.x, baseY - 5);
+                ctx.lineTo(unit.x - 10, baseY + 13);
+                ctx.lineTo(unit.x + 10, baseY + 13);
+                ctx.closePath();
+                ctx.fill();
+                
+                // Robe details
+                ctx.strokeStyle = '#FFD700';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(unit.x - 8, baseY + 5);
+                ctx.lineTo(unit.x + 8, baseY + 5);
+                ctx.stroke();
+                
+                // Head
+                ctx.fillStyle = '#FFD1A3';
+                ctx.beginPath();
+                ctx.arc(unit.x, baseY - 12, 6, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Wizard hat
+                ctx.fillStyle = '#4169E1';
+                ctx.beginPath();
+                ctx.moveTo(unit.x - 8, baseY - 12);
+                ctx.lineTo(unit.x, baseY - 25);
+                ctx.lineTo(unit.x + 8, baseY - 12);
+                ctx.closePath();
+                ctx.fill();
+                
+                // Hat brim
+                ctx.fillStyle = '#4169E1';
+                ctx.fillRect(unit.x - 10, baseY - 12, 20, 3);
+                
+                // Stars on hat
+                ctx.fillStyle = '#FFD700';
+                ctx.beginPath();
+                ctx.arc(unit.x, baseY - 18, 2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Staff
+                ctx.strokeStyle = '#8B4513';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(unit.x + 8, baseY - 5);
+                ctx.lineTo(unit.x + 8, baseY + 10);
+                ctx.stroke();
+                
+                // Staff orb
+                ctx.fillStyle = '#9370DB';
+                ctx.beginPath();
+                ctx.arc(unit.x + 8, baseY - 8, 4, 0, Math.PI * 2);
+                ctx.fill();
+            } else if (unit.name === 'Dragon') {
+                // Dragon body
+                ctx.fillStyle = '#FF4500';
+                ctx.fillRect(unit.x - 10, baseY - 5, 20, 12);
+                
+                // Dragon head
+                ctx.fillStyle = '#FF6347';
+                ctx.beginPath();
+                ctx.arc(unit.x + 12, baseY - 2, 8, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Eyes
+                ctx.fillStyle = '#FFD700';
+                ctx.beginPath();
+                ctx.arc(unit.x + 14, baseY - 4, 2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Horns
+                ctx.fillStyle = '#8B0000';
+                ctx.beginPath();
+                ctx.moveTo(unit.x + 10, baseY - 8);
+                ctx.lineTo(unit.x + 8, baseY - 14);
+                ctx.lineTo(unit.x + 12, baseY - 10);
+                ctx.fill();
+                
+                ctx.beginPath();
+                ctx.moveTo(unit.x + 14, baseY - 8);
+                ctx.lineTo(unit.x + 16, baseY - 14);
+                ctx.lineTo(unit.x + 12, baseY - 10);
+                ctx.fill();
+                
+                // Wings
+                ctx.fillStyle = '#FF8C00';
+                ctx.beginPath();
+                ctx.moveTo(unit.x - 5, baseY);
+                ctx.lineTo(unit.x - 18, baseY - 10);
+                ctx.lineTo(unit.x - 8, baseY + 5);
+                ctx.closePath();
+                ctx.fill();
+                
+                ctx.beginPath();
+                ctx.moveTo(unit.x - 5, baseY);
+                ctx.lineTo(unit.x - 18, baseY + 10);
+                ctx.lineTo(unit.x - 8, baseY + 5);
+                ctx.closePath();
+                ctx.fill();
+                
+                // Tail
+                ctx.strokeStyle = '#FF4500';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.moveTo(unit.x - 10, baseY);
+                ctx.quadraticCurveTo(unit.x - 18, baseY + 5, unit.x - 22, baseY);
+                ctx.stroke();
+            } else if (unit.name === 'HogRider') {
+                // Hog body
+                ctx.fillStyle = '#8B4513';
+                ctx.fillRect(unit.x - 10, baseY, 20, 12);
+                
+                // Hog head
+                ctx.fillStyle = '#A0522D';
+                ctx.beginPath();
+                ctx.arc(unit.x + 12, baseY + 6, 7, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Rider body
+                ctx.fillStyle = '#D2691E';
+                ctx.fillRect(unit.x - 6, baseY - 10, 12, 14);
+                
+                // Rider head
+                ctx.fillStyle = '#FFD1A3';
+                ctx.beginPath();
+                ctx.arc(unit.x, baseY - 16, 6, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Helmet
+                ctx.fillStyle = '#C0C0C0';
+                ctx.beginPath();
+                ctx.arc(unit.x, baseY - 17, 6, Math.PI, Math.PI * 2);
+                ctx.fill();
+                
+                // Hammer
+                ctx.strokeStyle = '#8B4513';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(unit.x + 8, baseY - 10);
+                ctx.lineTo(unit.x + 8, baseY - 18);
+                ctx.stroke();
+                
+                ctx.fillStyle = '#808080';
+                ctx.fillRect(unit.x + 4, baseY - 22, 8, 6);
+            } else if (unit.name === 'MegaKnight') {
+                // Mega Knight - large armored knight
+                const baseY = unit.isAerial ? unit.y - 10 : unit.y;
+                const isEnemy = unit.team === 'enemy';
+                
+                // Body - larger
+                ctx.fillStyle = '#2C3E50';
+                ctx.fillRect(unit.x - 12, baseY - 8, 24, 26);
+                
+                // Armor plates
+                ctx.fillStyle = '#34495E';
+                ctx.fillRect(unit.x - 10, baseY - 6, 8, 10);
+                ctx.fillRect(unit.x + 2, baseY - 6, 8, 10);
+                
+                // Spikes on shoulders
+                ctx.fillStyle = '#C0C0C0';
+                ctx.beginPath();
+                ctx.moveTo(unit.x - 12, baseY - 8);
+                ctx.lineTo(unit.x - 16, baseY - 12);
+                ctx.lineTo(unit.x - 10, baseY - 4);
+                ctx.fill();
+                
+                ctx.beginPath();
+                ctx.moveTo(unit.x + 12, baseY - 8);
+                ctx.lineTo(unit.x + 16, baseY - 12);
+                ctx.lineTo(unit.x + 10, baseY - 4);
+                ctx.fill();
+                
+                // Head
+                ctx.fillStyle = '#1C2833';
+                ctx.beginPath();
+                ctx.arc(unit.x, baseY - 16, 8, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Helmet horns
+                ctx.fillStyle = '#95A5A6';
+                ctx.beginPath();
+                ctx.moveTo(unit.x - 6, baseY - 18);
+                ctx.lineTo(unit.x - 10, baseY - 24);
+                ctx.lineTo(unit.x - 4, baseY - 20);
+                ctx.fill();
+                
+                ctx.beginPath();
+                ctx.moveTo(unit.x + 6, baseY - 18);
+                ctx.lineTo(unit.x + 10, baseY - 24);
+                ctx.lineTo(unit.x + 4, baseY - 20);
+                ctx.fill();
+                
+                // Glowing eyes
+                ctx.fillStyle = '#E74C3C';
+                ctx.beginPath();
+                ctx.arc(unit.x - 3, baseY - 17, 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(unit.x + 3, baseY - 17, 2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Cape
+                ctx.fillStyle = '#8E44AD';
+                ctx.beginPath();
+                ctx.moveTo(unit.x - 8, baseY - 6);
+                ctx.lineTo(unit.x - 14, baseY + 10);
+                ctx.lineTo(unit.x - 6, baseY + 12);
+                ctx.fill();
+                
+                ctx.beginPath();
+                ctx.moveTo(unit.x + 8, baseY - 6);
+                ctx.lineTo(unit.x + 14, baseY + 10);
+                ctx.lineTo(unit.x + 6, baseY + 12);
+                ctx.fill();
+            } else if (unit.name === 'MiniPEKKA') {
+                // Mini PEKKA - robotic warrior
+                const baseY = unit.isAerial ? unit.y - 10 : unit.y;
+                
+                // Body - robotic
+                ctx.fillStyle = '#34495E';
+                ctx.fillRect(unit.x - 10, baseY - 5, 20, 20);
+                
+                // Chest plate
+                ctx.fillStyle = '#7F8C8D';
+                ctx.fillRect(unit.x - 8, baseY - 3, 16, 14);
+                
+                // Central core
+                ctx.fillStyle = '#E74C3C';
+                ctx.beginPath();
+                ctx.arc(unit.x, baseY + 4, 4, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Head/Helmet
+                ctx.fillStyle = '#2C3E50';
+                ctx.fillRect(unit.x - 8, baseY - 14, 16, 10);
+                
+                // Visor
+                ctx.fillStyle = '#3498DB';
+                ctx.fillRect(unit.x - 6, baseY - 11, 12, 4);
+                
+                // Horns
+                ctx.fillStyle = '#95A5A6';
+                ctx.beginPath();
+                ctx.moveTo(unit.x - 8, baseY - 12);
+                ctx.lineTo(unit.x - 12, baseY - 16);
+                ctx.lineTo(unit.x - 6, baseY - 14);
+                ctx.fill();
+                
+                ctx.beginPath();
+                ctx.moveTo(unit.x + 8, baseY - 12);
+                ctx.lineTo(unit.x + 12, baseY - 16);
+                ctx.lineTo(unit.x + 6, baseY - 14);
+                ctx.fill();
+                
+                // Large sword
+                ctx.fillStyle = '#95A5A6';
+                ctx.fillRect(unit.x + 10, baseY - 10, 4, 22);
+                ctx.fillStyle = '#ECF0F1';
+                ctx.fillRect(unit.x + 11, baseY - 10, 2, 18);
+                
+                // Sword handle
+                ctx.fillStyle = '#8B4513';
+                ctx.fillRect(unit.x + 9, baseY + 12, 6, 4);
+            } else if (unit.name === 'Log') {
+                // Rolling log
+                const baseY = unit.isAerial ? unit.y - 10 : unit.y;
+                
+                // Log body
+                ctx.fillStyle = '#8B4513';
+                ctx.fillRect(unit.x - 25, baseY - 12, 50, 24);
+                
+                // Wood texture/rings
+                ctx.strokeStyle = '#654321';
+                ctx.lineWidth = 2;
+                for (let i = 0; i < 5; i++) {
+                    ctx.beginPath();
+                    ctx.arc(unit.x - 15 + i * 8, baseY, 6, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+                
+                // Wood grain lines
+                ctx.strokeStyle = '#4a3319';
+                ctx.lineWidth = 1;
+                for (let i = 0; i < 8; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(unit.x - 25 + i * 6, baseY - 12);
+                    ctx.lineTo(unit.x - 25 + i * 6, baseY + 12);
+                    ctx.stroke();
+                }
+                
+                // Bark texture
+                ctx.fillStyle = '#654321';
+                ctx.fillRect(unit.x - 25, baseY - 12, 50, 3);
+                ctx.fillRect(unit.x - 25, baseY + 9, 50, 3);
+            } else if (unit.name === 'Skeleton') {
+                // Skeleton body
+                ctx.fillStyle = '#F0E68C';
+                ctx.fillRect(unit.x - 4, baseY - 2, 8, 12);
+                
+                // Head (skull)
+                ctx.fillStyle = '#FFF8DC';
+                ctx.beginPath();
+                ctx.arc(unit.x, baseY - 8, 5, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Eye sockets
+                ctx.fillStyle = '#000';
+                ctx.beginPath();
+                ctx.arc(unit.x - 2, baseY - 9, 1.5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(unit.x + 2, baseY - 9, 1.5, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Sword
+                ctx.fillStyle = '#C0C0C0';
+                ctx.fillRect(unit.x + 5, baseY - 5, 2, 10);
+                ctx.fillStyle = '#8B4513';
+                ctx.fillRect(unit.x + 4, baseY + 5, 4, 2);
+            } else if (unit.name === 'Balloon') {
+                // Balloon
+                ctx.fillStyle = '#87CEEB';
+                ctx.beginPath();
+                ctx.arc(unit.x, baseY - 15, 12, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Balloon highlight
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                ctx.beginPath();
+                ctx.arc(unit.x - 4, baseY - 18, 5, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Rope
+                ctx.strokeStyle = '#654321';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(unit.x, baseY - 3);
+                ctx.lineTo(unit.x, baseY + 5);
+                ctx.stroke();
+                
+                // Basket
+                ctx.fillStyle = '#8B4513';
+                ctx.fillRect(unit.x - 6, baseY + 5, 12, 8);
+                
+                // Basket weave
+                ctx.strokeStyle = '#654321';
+                ctx.lineWidth = 1;
+                for (let i = 0; i < 3; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(unit.x - 6, baseY + 7 + i * 2);
+                    ctx.lineTo(unit.x + 6, baseY + 7 + i * 2);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        // Render cards in the UI
+        function renderCards() {
+            cardContainer.innerHTML = '';
+            
+            hand.forEach((card, idx) => {
+                const canAfford = elixir >= card.cost;
+                const unitCount = units.filter(u => u.team === 'player' && u.name === card.name).length;
+                const atLimit = unitCount >= 4;
+                
+                const cardElement = document.createElement('button');
+                cardElement.className = `card ${selectedCard?.id === card.id ? 'selected' : ''} ${!canAfford || atLimit ? 'disabled' : ''}`;
+                cardElement.innerHTML = `
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="${card.color}" stroke-width="2">
+                        <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"></path>
+                    </svg>
+                    <div class="card-name">${card.name}</div>
+                    ${atLimit ? '<div class="max-indicator">MAX</div>' : ''}
+                    <div class="card-cost">${card.cost}</div>
+                `;
+                
+                cardElement.addEventListener('click', () => {
+                    if (canAfford && !atLimit) {
+                        selectedCard = card;
+                        renderCards();
+                    }
+                });
+                
+                cardContainer.appendChild(cardElement);
+            });
+        }
+
+        // Update UI elements
+        function updateUI() {
+            elixirCount.textContent = elixir;
+            enemyKingHP.textContent = Math.max(0, towers.enemyKing.hp);
+            
+            if (isOvertime) {
+                timerElement.textContent = `OVERTIME!: ${Math.floor(overtimeTime / 60)}:${(overtimeTime % 60).toString().padStart(2, '0')}`;
+                timerElement.className = 'timer-box timer-overtime';
+            } else {
+                timerElement.textContent = `Time: ${Math.floor(gameTime / 60)}:${(gameTime % 60).toString().padStart(2, '0')}`;
+                timerElement.className = 'timer-box timer-normal';
+            }
+        }
+
+        // Initialize the game when the page loads
+        window.addEventListener('load', () => {
+            initGame();
+            canvas.addEventListener('click', handleCanvasClick);
+            resetButton.addEventListener('click', resetGame);
+        });
+    </script>
+</body>
+</html>
